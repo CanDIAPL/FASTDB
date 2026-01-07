@@ -149,7 +149,8 @@ def generate_spatial_id(
         )
 
     # Compute HEALPix index (NESTED scheme for spatial locality)
-    hpix = hp.ang2pix(NSIDE, ra, dec, nest=True, lonlat=True)
+    # Convert to Python int (healpy returns numpy int64)
+    hpix = int(hp.ang2pix(NSIDE, ra, dec, nest=True, lonlat=True))
 
     # Validate HEALPix fits in allocated bits (defensive check)
     if hpix > _MAX_HEALPIX:
@@ -175,6 +176,10 @@ def generate_spatial_id(
 
     high64 = (hpix << 24) | (procver_compact << 8) | (data_release >> 3)
     low64 = ((data_release & 0x7) << 61) | (mjd_ms << 18)
+
+    # Mask to 64 bits (Python integers are unbounded, struct.pack needs bounded)
+    high64 = high64 & 0xFFFFFFFFFFFFFFFF
+    low64 = low64 & 0xFFFFFFFFFFFFFFFF
 
     # Convert to bytes (big-endian) and create UUID
     uuid_bytes = struct.pack(">QQ", high64, low64)
