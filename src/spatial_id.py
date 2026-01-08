@@ -2,7 +2,7 @@
 Spatial UUID Generation for Multi-Master Conflict-Free Root Object Identification.
 
 This module generates deterministic 128-bit UUIDs that encode spatial position,
-processing version, data release, and timestamp. These UUIDs replace random
+timestamp, processing version, and data release. These UUIDs replace random
 rootid values to enable conflict-free multi-master replication.
 
 UUID Structure (128 bits, Big-Endian):
@@ -11,30 +11,52 @@ UUID Structure (128 bits, Big-Endian):
     Bit Position:
     0                                                                        127
     +------------------------------------------------------------------------+
-    | HEALPix (40) | ProcVer (16) | DataRelease (11) | MJD_ms (43) | Rsvd(18)|
+    | Reserved(2) | HEALPix (62)        | MJD_ms (43) | ProcVer (16) | DR(5) |
     +------------------------------------------------------------------------+
+
+Field Ordering Rationale:
+-------------------------
+Fields are ordered to enable hierarchical filtering:
+    1. Position (HEALPix): Filter by sky location first
+    2. Time (MJD): Then narrow by observation time
+    3. ProcVer: Then by processing version
+    4. DataRelease: Finally by data release
+
+This allows efficient range queries like:
+    - All objects at position X → mask HEALPix bits
+    - Objects at X observed in time range → add MJD bits
+    - Specific processing version at X,T → add ProcVer bits
 
 Field Capacities:
 -----------------
-    - HEALPix:     2^40 = 1.1 x 10^12 (sufficient for NSIDE=2^18)
-    - ProcVer:     2^16 = 65,536 processing versions
-    - DataRelease: 2^11 = 2,048 data releases (0=realtime, 1=DR1, ...)
-    - MJD_ms:      2^43 = 8.8 x 10^12 ms = ~101,000 days from epoch
-    - Reserved:    18 bits for future use (zero-filled)
+    - Reserved:   2 bits (always 0, for future use)
+    - HEALPix:    62 bits, NSIDE=2^29, ~0.0004" (0.4 milliarcsec) resolution
+    - MJD_ms:     43 bits = 278 years at 1ms precision from epoch
+    - ProcVer:    16 bits = 65,536 processing versions
+    - DataRelease: 5 bits = 32 data releases (0=realtime, 1-31=DR1-DR31)
 
-Note: DataRelease field spans the 64-bit boundary (8 bits in high word,
-      3 bits in low word) to maintain alignment.
+Byte Layout:
+------------
+    - high64 (bytes 0-7):  [Reserved:2][HEALPix:62] - HEALPix uses at most 62 bits
+    - low64 (bytes 8-15):  [MJD_ms:43][ProcVer:16][DataRelease:5]
 
 Grouping:
 ---------
-Objects with the same HEALPix + ProcVer share the first 56 bits, enabling
-efficient spatial grouping via bitmask: `spatial_id >> 72`
+For SQL compatibility (BIGINT is 64 bits), spatial grouping uses:
+    - Top 48 bits of HEALPix = 48 bits (fits in BIGINT)
+    - This provides ~0.05" grouping resolution (still sub-arcsecond)
 
 MJD Epoch:
 ----------
 MJD values are stored relative to MJD_EPOCH = 40000.0 (1968-05-23).
 This extends the representable range to MJD 40000-141851, covering
 all astronomical surveys through year 2280+.
+
+Precision:
+----------
+    - Spatial: ~0.0004" (0.4 milliarcseconds) - exceeds any telescope precision
+    - Temporal: 1 millisecond
+    - Coordinate recovery: Exact to HEALPix pixel center (~0.0004")
 """
 
 import struct
@@ -49,30 +71,46 @@ import healpy as hp
 
 # HEALPix Configuration
 # ---------------------
-# NSIDE = 2^18 = 262,144 provides ~0.78 arcsecond resolution, matching the
-# 1 arcsecond spatial matching threshold used in source_importer.py.
+# NSIDE = 2^29 is the maximum supported by healpy.
+# This provides ~0.0004" (0.4 milliarcsecond) resolution.
+# This exceeds the precision of any current ground-based or space telescope.
 #
-# Total HEALPix pixels = 12 * NSIDE^2 = 824,633,720,832 (~8.2 x 10^11)
-# This fits in 40 bits (max 2^40 = 1.1 x 10^12)
-NSIDE = 2**18
+# Total HEALPix pixels = 12 * NSIDE^2 = 12 * 2^58 ≈ 3.5 x 10^18
+# This fits in 62 bits (max 2^62 ≈ 4.6 x 10^18)
+#
+# Resolution = 206265" / NSIDE = 206265 / 2^29 ≈ 0.000385"
+NSIDE = 2**29
 
 # Bit Field Layout (128 bits total, big-endian)
 # ----------------------------------------------
-HEALPIX_BITS = 40
+# high64: [Reserved:2][HEALPix:62] - HEALPix values fit in 62 bits
+# low64:  [MJD_ms:43][ProcVer:16][DataRelease:5]
+#
+# Effective bit positions (0 = MSB):
+#   Bits 0-1:    Reserved (always 0)
+#   Bits 2-63:   HEALPix (62 bits)
+#   Bits 64-106: MJD_ms (43 bits)
+#   Bits 107-122: ProcVer (16 bits)
+#   Bits 123-127: DataRelease (5 bits)
+RESERVED_BITS = 2
+HEALPIX_BITS = 62
 PROCVER_BITS = 16
-DATARELEASE_BITS = 11
 MJD_BITS = 43
-RESERVED_BITS = 18
+DATARELEASE_BITS = 5
 
 # Compile-time assertion: ensure NSIDE doesn't exceed bit capacity
 assert 12 * NSIDE**2 <= (1 << HEALPIX_BITS), \
     f"NSIDE={NSIDE} produces HEALPix indices that exceed {HEALPIX_BITS}-bit capacity"
 
+# Verify total bits = 128
+assert RESERVED_BITS + HEALPIX_BITS + PROCVER_BITS + MJD_BITS + DATARELEASE_BITS == 128, \
+    "Bit fields must sum to 128"
+
 # Derived maximum values for validation
-_MAX_HEALPIX = (1 << HEALPIX_BITS) - 1        # 1,099,511,627,775
+_MAX_HEALPIX = (1 << HEALPIX_BITS) - 1        # 2^62 - 1 ≈ 4.6 x 10^18
 _MAX_PROCVER = (1 << PROCVER_BITS) - 1        # 65,535
-_MAX_DATARELEASE = (1 << DATARELEASE_BITS) - 1  # 2,047
 _MAX_MJD_MS = (1 << MJD_BITS) - 1             # 8,796,093,022,207
+_MAX_DATARELEASE = (1 << DATARELEASE_BITS) - 1  # 31 (0=realtime, 1-31=DR1-DR31)
 
 # MJD Epoch
 # ---------
@@ -83,6 +121,11 @@ MJD_EPOCH = 40000.0
 
 # Milliseconds per day (for MJD conversion)
 _MS_PER_DAY = 86_400_000
+
+# Spatial grouping uses top 48 bits of HEALPix
+# This provides ~0.05" grouping resolution (NSIDE=2^22 equivalent)
+# ProcVer is NOT included in spatial grouping (allows grouping across versions)
+_GROUPING_HEALPIX_BITS = 48
 
 
 # =============================================================================
@@ -113,7 +156,7 @@ def generate_spatial_id(
     procver_compact : int
         Processing version compact ID [0, 65535]
     data_release : int
-        Data release identifier [0, 2047] (0=realtime, 1=DR1, etc.)
+        Data release identifier [0, 31] (0=realtime, 1=DR1, etc.)
 
     Returns
     -------
@@ -169,13 +212,13 @@ def generate_spatial_id(
         )
 
     # Pack into 128 bits (big-endian)
-    # Layout: [HEALPix:40][ProcVer:16][DataRelease:11][MJD_ms:43][Reserved:18]
+    # Layout: [HEALPix:62][MJD_ms:43][ProcVer:16][DataRelease:5]
     #
-    # high64 contains: HEALPix (40) + ProcVer (16) + DataRelease high 8 bits
-    # low64 contains:  DataRelease low 3 bits + MJD_ms (43) + Reserved (18)
+    # high64: HEALPix (62 bits, with 2 reserved bits at top)
+    # low64:  MJD_ms (43) | ProcVer (16) | DataRelease (5)
 
-    high64 = (hpix << 24) | (procver_compact << 8) | (data_release >> 3)
-    low64 = ((data_release & 0x7) << 61) | (mjd_ms << 18)
+    high64 = hpix
+    low64 = (mjd_ms << 21) | (procver_compact << 5) | data_release
 
     # Mask to 64 bits (Python integers are unbounded, struct.pack needs bounded)
     high64 = high64 & 0xFFFFFFFFFFFFFFFF
@@ -202,10 +245,10 @@ def extract_healpix(spatial_id: uuid.UUID) -> int:
     Returns
     -------
     int
-        HEALPix index (NESTED scheme at NSIDE=2^18)
+        HEALPix index (NESTED scheme at NSIDE=2^29)
     """
     high64 = struct.unpack(">Q", spatial_id.bytes[:8])[0]
-    return high64 >> 24
+    return high64
 
 
 def extract_procver(spatial_id: uuid.UUID) -> int:
@@ -222,15 +265,13 @@ def extract_procver(spatial_id: uuid.UUID) -> int:
     int
         Processing version compact ID [0, 65535]
     """
-    high64 = struct.unpack(">Q", spatial_id.bytes[:8])[0]
-    return (high64 >> 8) & 0xFFFF
+    low64 = struct.unpack(">Q", spatial_id.bytes[8:])[0]
+    return (low64 >> 5) & 0xFFFF
 
 
 def extract_data_release(spatial_id: uuid.UUID) -> int:
     """
     Extract data release ID from spatial_id.
-
-    Note: DataRelease spans the 64-bit boundary (8 bits high, 3 bits low).
 
     Parameters
     ----------
@@ -240,10 +281,10 @@ def extract_data_release(spatial_id: uuid.UUID) -> int:
     Returns
     -------
     int
-        Data release ID [0, 2047] (0=realtime, 1=DR1, etc.)
+        Data release ID [0, 31] (0=realtime, 1=DR1, etc.)
     """
-    high64, low64 = struct.unpack(">QQ", spatial_id.bytes)
-    return ((high64 & 0xFF) << 3) | (low64 >> 61)
+    low64 = struct.unpack(">Q", spatial_id.bytes[8:])[0]
+    return low64 & 0x1F
 
 
 def extract_mjd(spatial_id: uuid.UUID) -> float:
@@ -261,7 +302,7 @@ def extract_mjd(spatial_id: uuid.UUID) -> float:
         Modified Julian Date
     """
     low64 = struct.unpack(">Q", spatial_id.bytes[8:])[0]
-    mjd_ms = (low64 >> 18) & 0x7FFFFFFFFFF  # 43 bits
+    mjd_ms = (low64 >> 21) & 0x7FFFFFFFFFF  # 43 bits
     return (mjd_ms / _MS_PER_DAY) + MJD_EPOCH
 
 
@@ -281,10 +322,10 @@ def extract_all(spatial_id: uuid.UUID) -> Tuple[int, int, int, float]:
     """
     high64, low64 = struct.unpack(">QQ", spatial_id.bytes)
 
-    healpix = high64 >> 24
-    procver = (high64 >> 8) & 0xFFFF
-    data_release = ((high64 & 0xFF) << 3) | (low64 >> 61)
-    mjd_ms = (low64 >> 18) & 0x7FFFFFFFFFF
+    healpix = high64
+    mjd_ms = (low64 >> 21) & 0x7FFFFFFFFFF  # 43 bits
+    procver = (low64 >> 5) & 0xFFFF  # 16 bits
+    data_release = low64 & 0x1F  # 5 bits
     mjd = (mjd_ms / _MS_PER_DAY) + MJD_EPOCH
 
     return healpix, procver, data_release, mjd
@@ -296,11 +337,14 @@ def extract_all(spatial_id: uuid.UUID) -> Tuple[int, int, int, float]:
 
 def spatial_group_int(spatial_id: uuid.UUID) -> int:
     """
-    Extract grouping prefix (HEALPix + ProcVer, 56 bits) as integer.
+    Extract spatial grouping prefix as 64-bit integer for SQL compatibility.
 
-    Objects with the same spatial_group_int are in the same spatial group
-    and should be considered related (e.g., same astronomical object across
-    different observations).
+    Uses top 48 bits of HEALPix only (NOT including ProcVer).
+    This provides ~0.05" grouping resolution while fitting in SQL BIGINT.
+
+    Objects with the same spatial_group_int are at the same sky position
+    (regardless of observation time, processing version, or data release).
+    This enables queries like "find all observations of this object".
 
     Parameters
     ----------
@@ -310,17 +354,20 @@ def spatial_group_int(spatial_id: uuid.UUID) -> int:
     Returns
     -------
     int
-        56-bit grouping prefix (HEALPix + ProcVer)
+        48-bit spatial grouping prefix (top 48 bits of HEALPix)
 
     Examples
     --------
     >>> sid1 = generate_spatial_id(180.0, 0.0, 60000.0, 1, 0)
-    >>> sid2 = generate_spatial_id(180.0, 0.0, 60001.0, 1, 0)  # Different time
+    >>> sid2 = generate_spatial_id(180.0, 0.0, 60001.0, 2, 1)  # Different time/procver/dr
     >>> spatial_group_int(sid1) == spatial_group_int(sid2)
     True
     """
     high64 = struct.unpack(">Q", spatial_id.bytes[:8])[0]
-    return high64 >> 8  # Top 56 bits
+
+    # Top 48 bits of HEALPix (shift right 16 to get top 48)
+    # This gives ~0.05" spatial resolution for grouping
+    return high64 >> 16
 
 
 def same_spatial_group(sid1: uuid.UUID, sid2: uuid.UUID) -> bool:
@@ -335,7 +382,7 @@ def same_spatial_group(sid1: uuid.UUID, sid2: uuid.UUID) -> bool:
     Returns
     -------
     bool
-        True if both IDs share the same HEALPix + ProcVer prefix
+        True if both IDs share the same spatial group prefix
     """
     return spatial_group_int(sid1) == spatial_group_int(sid2)
 
@@ -346,15 +393,15 @@ def same_spatial_group(sid1: uuid.UUID, sid2: uuid.UUID) -> bool:
 
 def healpix_to_radec(healpix: int) -> Tuple[float, float]:
     """
-    Convert HEALPix index back to approximate RA/Dec coordinates.
+    Convert HEALPix index back to RA/Dec coordinates.
 
-    Note: This returns the center of the HEALPix pixel, not the original
-    coordinates. Precision is limited to ~0.78 arcseconds (NSIDE=2^18).
+    With NSIDE=2^29, precision is ~0.0004" (0.4 milliarcseconds),
+    which exceeds the measurement precision of any current telescope.
 
     Parameters
     ----------
     healpix : int
-        HEALPix index (NESTED scheme at NSIDE=2^18)
+        HEALPix index (NESTED scheme at NSIDE=2^29)
 
     Returns
     -------
@@ -367,9 +414,10 @@ def healpix_to_radec(healpix: int) -> Tuple[float, float]:
 
 def extract_approx_radec(spatial_id: uuid.UUID) -> Tuple[float, float]:
     """
-    Extract approximate RA/Dec from spatial_id.
+    Extract RA/Dec from spatial_id.
 
-    Note: Precision is limited to ~0.78 arcseconds due to HEALPix quantization.
+    With NSIDE=2^29, the recovered coordinates have ~0.0004" precision,
+    which exceeds the measurement precision of any current telescope.
 
     Parameters
     ----------
@@ -379,7 +427,7 @@ def extract_approx_radec(spatial_id: uuid.UUID) -> Tuple[float, float]:
     Returns
     -------
     tuple
-        (ra, dec) in degrees (approximate, center of HEALPix pixel)
+        (ra, dec) in degrees (center of HEALPix pixel)
     """
     healpix = extract_healpix(spatial_id)
     return healpix_to_radec(healpix)
