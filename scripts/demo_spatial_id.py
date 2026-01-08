@@ -1,25 +1,11 @@
 #!/usr/bin/env python3
 """
-Demo: Spatial ID Multi-Precision Querying
+Demo: Spatial ID for Multi-Master Conflict-Free Grouping
 
-This script demonstrates how the spatial_id UUID enables querying objects
-at different precision levels with hierarchical filtering.
-
-UUID Layout (128 bits):
-    high64: [Reserved:2][HEALPix:62]
-    low64:  [MJD_ms:43][ProcVer:16][DataRelease:5]
-
-Field ordering enables hierarchical filtering:
-    1. Position (HEALPix) - Filter by sky location first
-    2. Time (MJD) - Then narrow by observation time
-    3. ProcVer - Then by processing version
-    4. DataRelease - Finally by data release
-
-Key Features Demonstrated:
-1. Same sky position → same spatial_group (across ALL time/procver/dr)
-2. Different precision levels via bit masking
-3. Hierarchical filtering: position → time → procver → dr
-4. Multi-master safe deterministic generation
+This script demonstrates the practical workflow for using spatial_id:
+1. Converting RA/Dec coordinates to a spatial_id UUID
+2. How spatial_id enables position-based queries without lookup tables
+3. Comparison of old rootid queries vs new spatial_id queries
 """
 
 import sys
@@ -29,8 +15,10 @@ from spatial_id import (
     generate_spatial_id,
     extract_all,
     extract_healpix,
+    extract_mjd,
+    extract_procver,
+    extract_data_release,
     spatial_group_int,
-    same_spatial_group,
     healpix_to_radec,
     extract_approx_radec,
     NSIDE,
@@ -38,261 +26,342 @@ from spatial_id import (
 )
 
 
-def demo_spatial_grouping():
+def demo_coordinate_to_uuid():
     """
-    Demonstrate that objects at the same position share grouping prefix
-    regardless of observation time or data release.
+    Show the complete workflow: RA/Dec → HEALPix → spatial_id UUID
     """
     print("=" * 70)
-    print("DEMO 1: Spatial Grouping Across Time/Data Releases")
+    print("STEP 1: Converting Coordinates to spatial_id UUID")
     print("=" * 70)
     print()
 
-    # Same position, different times and data releases
-    ra, dec = 180.000102, 45.008  # Sky position
-    procver = 1  # Same processing version
+    # Input parameters (what you have from an observation)
+    ra = 150.12345       # Right Ascension in degrees
+    dec = 2.34567        # Declination in degrees
+    mjd = 60500.123      # Modified Julian Date of observation
+    procver = 1          # Processing version compact ID
+    data_release = 0     # 0 = realtime, 1 = DR1, etc.
+
+    print("Input Parameters:")
+    print("-" * 40)
+    print(f"  RA:           {ra}°")
+    print(f"  Dec:          {dec}°")
+    print(f"  MJD:          {mjd}")
+    print(f"  ProcVer:      {procver}")
+    print(f"  DataRelease:  {data_release}")
+    print()
+
+    # Generate the spatial_id
+    sid = generate_spatial_id(ra, dec, mjd, procver, data_release)
+
+    print("Generated spatial_id:")
+    print("-" * 40)
+    print(f"  UUID:         {sid}")
+    print(f"  Hex:          {sid.hex}")
+    print()
+
+    # Show what's encoded in the UUID
+    print("Encoded Information (extracted from UUID):")
+    print("-" * 40)
+    healpix = extract_healpix(sid)
+    recovered_ra, recovered_dec = extract_approx_radec(sid)
+    recovered_mjd = extract_mjd(sid)
+    recovered_procver = extract_procver(sid)
+    recovered_dr = extract_data_release(sid)
+
+    print(f"  HEALPix index: {healpix}")
+    print(f"  Recovered RA:  {recovered_ra:.6f}° (error: {abs(recovered_ra - ra) * 3600:.4f}\")")
+    print(f"  Recovered Dec: {recovered_dec:.6f}° (error: {abs(recovered_dec - dec) * 3600:.4f}\")")
+    print(f"  Recovered MJD: {recovered_mjd:.6f} (error: {abs(recovered_mjd - mjd) * 86400:.3f} sec)")
+    print(f"  ProcVer:       {recovered_procver}")
+    print(f"  DataRelease:   {recovered_dr}")
+    print()
+
+    # Show the spatial group for queries
+    group = spatial_group_int(sid)
+    print("Spatial Group (for SQL queries):")
+    print("-" * 40)
+    print(f"  group_int:    {group}")
+    print(f"  This groups all objects within ~0.05\" of this position")
+    print()
+
+    return sid, ra, dec, mjd, procver, data_release
+
+
+def demo_multiple_observations():
+    """
+    Show how multiple observations of the same object get the same spatial group.
+    """
+    print("=" * 70)
+    print("STEP 2: Multiple Observations at Same Position")
+    print("=" * 70)
+    print()
+
+    # Same object observed multiple times
+    ra, dec = 150.12345, 2.34567
+
+    print(f"Object Position: RA={ra}°, Dec={dec}°")
+    print()
 
     observations = [
-        (60000.0, 0, "Realtime observation 1"),
-        (60001.0, 0, "Realtime observation 2 (1 day later)"),
-        (60100.0, 0, "Realtime observation 3 (100 days later)"),
-        (60000.0, 1, "DR1 processed"),
-        (60100.0, 2, "DR2 processed"),
+        # (mjd, procver, data_release, description)
+        (60500.1, 1, 0, "Night 1, realtime"),
+        (60501.2, 1, 0, "Night 2, realtime"),
+        (60502.3, 1, 0, "Night 3, realtime"),
+        (60500.1, 2, 0, "Night 1, reprocessed with v2"),
+        (60500.1, 1, 1, "Night 1, included in DR1"),
     ]
 
-    print(f"Sky Position: RA={ra}°, Dec={dec}°")
-    print(f"Processing Version: {procver}")
-    print()
+    print("Observations:")
+    print("-" * 70)
+    print(f"{'Description':<30} {'MJD':<12} {'PV':<4} {'DR':<4} {'Group':<20}")
+    print("-" * 70)
 
-    spatial_ids = []
-    for mjd, dr, desc in observations:
-        sid = generate_spatial_id(ra, dec, mjd, procver, dr)
-        spatial_ids.append(sid)
+    groups = []
+    for mjd, pv, dr, desc in observations:
+        sid = generate_spatial_id(ra, dec, mjd, pv, dr)
         group = spatial_group_int(sid)
-        print(f"  {desc}")
-        print(f"    MJD: {mjd}, DataRelease: {dr}")
-        print(f"    spatial_id: {sid}")
-        print(f"    group_int: {group}")
-        print()
+        groups.append(group)
+        print(f"{desc:<30} {mjd:<12.1f} {pv:<4} {dr:<4} {group:<20}")
 
-    # All should have the same spatial group
-    groups = [spatial_group_int(sid) for sid in spatial_ids]
+    print("-" * 70)
     all_same = len(set(groups)) == 1
-    print(f"All observations in same spatial group: {all_same}")
+    print(f"All observations share same spatial_group: {all_same}")
+    print()
+    print("Key insight: spatial_group is based on POSITION only.")
+    print("Time, procver, and data_release are encoded but don't affect grouping.")
     print()
 
 
-def demo_precision_levels():
+def demo_old_vs_new_queries():
     """
-    Demonstrate querying at different precision levels by masking bits.
-    """
-    print("=" * 70)
-    print("DEMO 2: Multi-Precision Querying via Bit Masking")
-    print("=" * 70)
-    print()
-
-    # Generate spatial_id for a reference position
-    ra_ref, dec_ref = 180.00012, 45.002
-    sid_ref = generate_spatial_id(ra_ref, dec_ref, 60000.0, 1, 0)
-    healpix_ref = extract_healpix(sid_ref)
-
-    print(f"Reference Position: RA={ra_ref}°, Dec={dec_ref}°")
-    print(f"HEALPix index: {healpix_ref}")
-    print()
-
-    # Different precision levels by masking HEALPix bits
-    precision_levels = [
-        (62, "Full precision (~0.0004\", native NSIDE=2^29)"),
-        (48, "~0.05\" resolution (group matching)"),
-        (40, "~0.8\" resolution"),
-        (32, "~13\" resolution"),
-        (24, "~3.5' resolution"),
-        (16, "~1° resolution"),
-    ]
-
-    print("Precision Levels via Bit Masking:")
-    print("-" * 50)
-    for bits, desc in precision_levels:
-        mask = ((1 << bits) - 1) << (62 - bits)
-        masked = healpix_ref & mask
-        print(f"  {bits} bits: {desc}")
-        print(f"    Mask: 0x{mask:016X}")
-        print(f"    Masked HEALPix: {masked}")
-        print()
-
-    # Example: Find nearby objects at different precision
-    print("Example Query Patterns:")
-    print("-" * 50)
-    print("""
-    -- Full precision match (exact position, ~0.0004")
-    SELECT * FROM diaobject
-    WHERE spatial_group(rootid) = spatial_group('{sid_ref}')
-
-    -- Coarse match (~13" radius)
-    SELECT * FROM diaobject
-    WHERE (spatial_group(rootid) >> 16) = (spatial_group('{sid_ref}') >> 16)
-
-    -- Very coarse match (~1° radius)
-    SELECT * FROM diaobject
-    WHERE (spatial_group(rootid) >> 48) = (spatial_group('{sid_ref}') >> 48)
-    """.format(sid_ref=sid_ref))
-
-
-def demo_hierarchical_filtering():
-    """
-    Demonstrate hierarchical filtering: position → time → procver → dr.
+    Compare old rootid-based queries with new spatial_id queries.
     """
     print("=" * 70)
-    print("DEMO 3: Hierarchical Filtering (Position → Time → ProcVer → DR)")
+    print("STEP 3: Query Comparison - Old (rootid) vs New (spatial_id)")
     print("=" * 70)
     print()
 
-    ra, dec = 180.0, 45.0
-
-    print(f"Same Position: RA={ra}°, Dec={dec}°")
-    print()
-
-    # Different times, procvers, and data releases at same position
-    observations = [
-        (60000.0, 1, 0, "Realtime, AP v1"),
-        (60000.0, 2, 0, "Realtime, AP v2"),
-        (60100.0, 1, 0, "100 days later, AP v1"),
-        (60100.0, 2, 1, "100 days later, AP v2, DR1"),
-    ]
-
-    print("Observations at same position (different time/procver/dr):")
-    print("-" * 50)
-    for mjd, procver, dr, desc in observations:
-        sid = generate_spatial_id(ra, dec, mjd, procver, dr)
-        group = spatial_group_int(sid)
-        print(f"  {desc}")
-        print(f"    spatial_id: {sid}")
-        print(f"    group_int: {group}")
-        print()
-
-    # Check that all have same spatial group
-    sids = [generate_spatial_id(ra, dec, mjd, pv, dr) for mjd, pv, dr, _ in observations]
-    all_same_group = len(set(spatial_group_int(s) for s in sids)) == 1
-    print(f"All observations in same spatial group: {all_same_group}")
-    print("(Expected: True - spatial grouping is position-only)")
-    print()
-    print("To filter by time/procver/dr, compare the full spatial_id or extract fields.")
-    print()
-
-
-def demo_coordinate_recovery():
-    """
-    Demonstrate recovering coordinates from spatial_id.
-    """
-    print("=" * 70)
-    print("DEMO 4: Coordinate Recovery from spatial_id")
-    print("=" * 70)
-    print()
-
-    test_positions = [
-        (0.0, 0.0, "Equator at RA=0"),
-        (180.0, 45.0, "Northern hemisphere"),
-        (270.0, -45.0, "Southern hemisphere"),
-        (123.456789, 67.890123, "High precision input"),
-    ]
-
-    print("Coordinate Recovery Precision:")
-    print("-" * 50)
-    for ra_in, dec_in, desc in test_positions:
-        sid = generate_spatial_id(ra_in, dec_in, 60000.0, 1, 0)
-        ra_out, dec_out = extract_approx_radec(sid)
-
-        ra_err = abs(ra_out - ra_in) * 3600  # arcseconds
-        dec_err = abs(dec_out - dec_in) * 3600  # arcseconds
-
-        print(f"  {desc}:")
-        print(f"    Input:  RA={ra_in:12.6f}°, Dec={dec_in:12.6f}°")
-        print(f"    Output: RA={ra_out:12.6f}°, Dec={dec_out:12.6f}°")
-        print(f"    Error:  RA={ra_err:.6f}\", Dec={dec_err:.6f}\"")
-        print()
-
-
-def demo_multi_master_determinism():
-    """
-    Demonstrate that the same inputs always produce the same spatial_id.
-    """
-    print("=" * 70)
-    print("DEMO 5: Multi-Master Determinism")
-    print("=" * 70)
-    print()
-
-    print("Generating spatial_id 5 times with identical inputs:")
-    print("-" * 50)
-
-    args = (180.0, 45.0, 60000.0, 1, 0)
-    results = [generate_spatial_id(*args) for _ in range(5)]
-
-    for i, sid in enumerate(results, 1):
-        print(f"  Generation {i}: {sid}")
-
-    all_equal = len(set(results)) == 1
-    print()
-    print(f"All generated spatial_ids identical: {all_equal}")
-    print("(This ensures conflict-free multi-master replication)")
-    print()
-
-
-def demo_sql_integration():
-    """
-    Show example SQL queries using spatial_group function.
-    """
-    print("=" * 70)
-    print("DEMO 6: SQL Query Integration")
-    print("=" * 70)
-    print()
-
-    sid = generate_spatial_id(180.0, 45.0, 60000.0, 1, 0)
+    # Example: User wants light curve for object at RA=150.12345, Dec=2.34567
+    ra, dec = 150.12345, 2.34567
+    sid = generate_spatial_id(ra, dec, 60500.0, 1, 0)
     group = spatial_group_int(sid)
 
-    print("Example SQL Queries:")
-    print("-" * 50)
+    print(f"Goal: Get light curve for object at RA={ra}°, Dec={dec}°")
+    print()
+
+    print("OLD APPROACH (rootid-based):")
+    print("-" * 70)
+    print("""
+    -- Step 1: Find diaobject by position (cone search)
+    SELECT diaobjectid, rootid FROM diaobject
+    WHERE q3c_radial_query(ra, dec, {ra}, {dec}, 1.0/3600);
+
+    -- Step 2: Use rootid to find related objects
+    -- Problem: rootid is random UUID, requires lookup table
+    SELECT diaobjectid FROM diaobject
+    WHERE rootid = (SELECT rootid FROM diaobject WHERE diaobjectid = ?);
+
+    -- Step 3: Get light curve
+    SELECT midpointtai, psflux FROM diasource
+    WHERE diaobjectid IN (SELECT diaobjectid FROM ...);
+
+    Issues:
+    - Requires cone search to find initial object
+    - rootid is arbitrary, requires join with root_diaobject table
+    - In multi-master setup, rootid conflicts possible
+    """.format(ra=ra, dec=dec))
+
+    print()
+    print("NEW APPROACH (spatial_id-based):")
+    print("-" * 70)
     print(f"""
--- Find all objects in the same spatial group as a target
-SELECT diaobjectid, ra, dec
-FROM diaobject
-WHERE spatial_group(rootid) = {group};
+    -- Generate spatial_id from coordinates (done in Python):
+    -- sid = generate_spatial_id(ra={ra}, dec={dec}, mjd=60500.0, procver=1, dr=0)
+    -- group = spatial_group_int(sid) = {group}
 
--- Find all observations of objects in a spatial region
-SELECT s.diaobjectid, s.midpointtai, s.psflux
-FROM diasource s
-JOIN diaobject o ON s.diaobjectid = o.diaobjectid
-WHERE spatial_group(o.rootid) = spatial_group('{sid}'::uuid);
+    -- Single query: Find all objects at this position
+    SELECT diaobjectid, ra, dec FROM diaobject
+    WHERE spatial_group(rootid) = {group};
 
--- Count objects by spatial group
-SELECT spatial_group(rootid) as grp, count(*) as cnt
-FROM diaobject
-GROUP BY 1
-ORDER BY cnt DESC
-LIMIT 10;
+    -- Get light curve for all observations at this position
+    SELECT s.midpointtai, s.psflux, o.diaobjectid
+    FROM diasource s
+    JOIN diaobject o ON s.diaobjectid = o.diaobjectid
+    WHERE spatial_group(o.rootid) = {group}
+    ORDER BY s.midpointtai;
 
--- Find nearby groups (within ~13")
-SELECT DISTINCT spatial_group(rootid)
-FROM diaobject
-WHERE (spatial_group(rootid) >> 16) = ({group} >> 16);
+    Benefits:
+    - No cone search needed - position encoded in UUID
+    - No lookup table - grouping via bitmask
+    - Multi-master safe - same coordinates = same spatial_id
+    - Indexed: CREATE INDEX ON diaobject(spatial_group(rootid))
+    """)
+    print()
+
+
+def demo_precision_filtering():
+    """
+    Show how to filter at different spatial precisions.
+    """
+    print("=" * 70)
+    print("STEP 4: Multi-Precision Filtering")
+    print("=" * 70)
+    print()
+
+    ra, dec = 150.12345, 2.34567
+    sid = generate_spatial_id(ra, dec, 60500.0, 1, 0)
+    group = spatial_group_int(sid)
+    healpix = extract_healpix(sid)
+
+    print(f"Target: RA={ra}°, Dec={dec}°")
+    print(f"HEALPix: {healpix}")
+    print(f"spatial_group: {group}")
+    print()
+
+    print("Precision Levels (via bit shifting):")
+    print("-" * 70)
+
+    precisions = [
+        (0, "~0.05\" (default spatial_group)", "Exact object matching"),
+        (8, "~0.2\"", "Tight clustering"),
+        (16, "~0.8\"", "Typical seeing disk"),
+        (24, "~3\"", "Extended source"),
+        (32, "~50\"", "Galaxy group"),
+    ]
+
+    for shift, resolution, use_case in precisions:
+        coarse_group = group >> shift
+        print(f"  spatial_group >> {shift:2d} = {coarse_group:<20} ({resolution}, {use_case})")
+
+    print()
+    print("SQL Examples:")
+    print("-" * 70)
+    print(f"""
+    -- Exact position match (~0.05")
+    WHERE spatial_group(rootid) = {group}
+
+    -- Objects within ~0.8" (shift 16 bits)
+    WHERE (spatial_group(rootid) >> 16) = ({group} >> 16)
+
+    -- Objects within ~50" (shift 32 bits)
+    WHERE (spatial_group(rootid) >> 32) = ({group} >> 32)
+    """)
+    print()
+
+
+def demo_time_filtering():
+    """
+    Show how to filter by time after position filtering.
+    """
+    print("=" * 70)
+    print("STEP 5: Hierarchical Filtering (Position then Time)")
+    print("=" * 70)
+    print()
+
+    ra, dec = 150.12345, 2.34567
+
+    # Generate IDs for observations at different times
+    obs1 = generate_spatial_id(ra, dec, 60500.0, 1, 0)
+    obs2 = generate_spatial_id(ra, dec, 60600.0, 1, 0)
+    obs3 = generate_spatial_id(ra, dec, 60700.0, 1, 0)
+
+    print(f"Three observations at RA={ra}°, Dec={dec}°:")
+    print("-" * 70)
+    print(f"  MJD 60500: {obs1}")
+    print(f"  MJD 60600: {obs2}")
+    print(f"  MJD 60700: {obs3}")
+    print()
+
+    # All have same spatial group
+    print(f"All have spatial_group = {spatial_group_int(obs1)}")
+    print()
+
+    print("Query Pattern - Find observations in time range:")
+    print("-" * 70)
+    print(f"""
+    -- Step 1: Python generates the spatial_id for target position
+    target_sid = generate_spatial_id({ra}, {dec}, 60500.0, 1, 0)
+    target_group = spatial_group_int(target_sid)  # = {spatial_group_int(obs1)}
+
+    -- Step 2: SQL finds all observations at position, filters by time
+    SELECT o.diaobjectid, o.validitystartmjdtai, s.midpointtai, s.psflux
+    FROM diaobject o
+    JOIN diasource s ON s.diaobjectid = o.diaobjectid
+    WHERE spatial_group(o.rootid) = {spatial_group_int(obs1)}
+      AND s.midpointtai BETWEEN 60500 AND 60650  -- Time range filter
+    ORDER BY s.midpointtai;
+
+    The UUID bit ordering (position → time → procver → dr) means:
+    - Position filtering uses the index efficiently
+    - Time filtering narrows results after position match
+    - procver/dr filtering further refines if needed
+    """)
+    print()
+
+
+def demo_workflow_summary():
+    """
+    Summarize the complete workflow.
+    """
+    print("=" * 70)
+    print("SUMMARY: spatial_id Workflow")
+    print("=" * 70)
+    print()
+
+    print("""
+    UUID Layout (128 bits):
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ high64: [Reserved:2][HEALPix:62]                                │
+    │ low64:  [MJD_ms:43][ProcVer:16][DataRelease:5]                  │
+    └─────────────────────────────────────────────────────────────────┘
+
+    Workflow:
+
+    1. INGEST: When importing a diaobject
+       ┌──────────────────────────────────────────────────────────────┐
+       │ rootid = generate_spatial_id(ra, dec, mjd, procver, dr)      │
+       │ INSERT INTO diaobject (rootid, ra, dec, ...) VALUES (...)    │
+       └──────────────────────────────────────────────────────────────┘
+
+    2. QUERY: When searching for objects
+       ┌──────────────────────────────────────────────────────────────┐
+       │ # Python: Generate target spatial_id from coordinates        │
+       │ target = generate_spatial_id(ra, dec, any_mjd, any_pv, 0)    │
+       │ group = spatial_group_int(target)                            │
+       │                                                              │
+       │ # SQL: Find all objects at that position                     │
+       │ SELECT * FROM diaobject                                      │
+       │ WHERE spatial_group(rootid) = :group                         │
+       └──────────────────────────────────────────────────────────────┘
+
+    3. MULTI-MASTER: Same inputs = Same rootid
+       ┌──────────────────────────────────────────────────────────────┐
+       │ Master A: generate_spatial_id(150.0, 2.0, 60500, 1, 0) = X   │
+       │ Master B: generate_spatial_id(150.0, 2.0, 60500, 1, 0) = X   │
+       │                                                              │
+       │ No conflicts! Both masters generate identical rootid.        │
+       └──────────────────────────────────────────────────────────────┘
     """)
 
 
 def main():
     print()
-    print("SPATIAL_ID DEMO: Multi-Precision Querying for Multi-Master Replication")
+    print("SPATIAL_ID DEMO: From Coordinates to Queries")
     print("=" * 70)
     print()
-    print(f"Configuration: NSIDE = 2^29 = {NSIDE:,}")
-    print(f"Native resolution: ~0.0004\" (0.4 milliarcseconds)")
-    print(f"MJD epoch: {MJD_EPOCH}")
+    print(f"Configuration:")
+    print(f"  NSIDE = 2^29 = {NSIDE:,}")
+    print(f"  Spatial precision: ~0.0004\" (0.4 milliarcseconds)")
+    print(f"  MJD epoch: {MJD_EPOCH} (extends range to year 2280+)")
     print()
 
-    demo_spatial_grouping()
-    demo_precision_levels()
-    demo_hierarchical_filtering()
-    demo_coordinate_recovery()
-    demo_multi_master_determinism()
-    demo_sql_integration()
+    demo_coordinate_to_uuid()
+    demo_multiple_observations()
+    demo_old_vs_new_queries()
+    demo_precision_filtering()
+    demo_time_filtering()
+    demo_workflow_summary()
 
     print("=" * 70)
     print("Demo Complete!")
