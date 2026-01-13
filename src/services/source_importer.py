@@ -3,8 +3,8 @@ import datetime
 import argparse
 
 import db
-
 import util
+from spatial_id import generate_spatial_id
 
 
 class SourceImporter:
@@ -63,7 +63,8 @@ class SourceImporter:
         return mask
 
 
-    def __init__( self, base_processing_version, object_base_processing_version, object_match_radius=1. ):
+    def __init__( self, base_processing_version, object_base_processing_version,
+                  procver=0, data_release=0 ):
         """Create a SourceImporter.
 
         Parameters
@@ -72,14 +73,21 @@ class SourceImporter:
             The processing version.  This must be a valid entry (id or
             description) in the base_processing_version table.
 
-          object_match_radius : float, default 1.
-            Objects within this many arcsec of an existing object will be considered
-            the same root_diaobject.
+          object_base_processing_version : UUID or str
+            The processing version for objects.
+
+          procver : int, default 0
+            Processing version compact ID for spatial_id encoding [0, 65535].
+
+          data_release : int, default 0
+            Data release identifier for spatial_id encoding [0, 31].
+            0 = realtime, 1-31 = DR1-DR31.
 
         """
         self.base_processing_version = util.base_procver_id( base_processing_version )
         self.object_base_processing_version = util.base_procver_id( object_base_processing_version )
-        self.object_match_radius = float( object_match_radius )
+        self.procver = procver
+        self.data_release = data_release
 
 
     def _read_mongo_fields( self, pqconn, collection, pipeline, lcfields, funcfields, funcmongofields,
@@ -243,9 +251,36 @@ class SourceImporter:
 
     def import_objects_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
                                         conn=None, commit=True ):
-        """Write docs.
+        """Import diaobject records from MongoDB using spatial_id for rootid.
 
-        Do.
+        Each diaobject gets a deterministic rootid based on its (ra, dec, mjd, procver, data_release).
+        Same data imported multiple times produces identical rootids. Grouping by position
+        happens at query time via spatial_group(rootid).
+
+        Parameters
+        ----------
+          collection : pymongo.collection
+            The MongoDB collection to import from.
+
+          t0, t1 : datetime.datetime or None
+            Time limits. Will import objects with t0 < savetime <= t1.
+
+          batchsize : int, default 10000
+            Batch size for MongoDB reads.
+
+          conn : psycopg.Connection or None
+            Database connection. If None, creates a new one.
+
+          commit : bool, default True
+            Whether to commit the transaction.
+
+        Returns
+        -------
+          nobjs : int
+            Number of objects imported.
+
+          nroot : int
+            Number of root_diaobject entries created (for backward compat).
         """
         with db.DB( conn ) as pqconn:
             self.read_mongo_objects( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
@@ -260,39 +295,25 @@ class SourceImporter:
                             "    o.diaobjectid=tdi.diaobjectid AND o.base_procver_id=tdi.base_procver_id "
                             "  WHERE o.diaobjectid IS NULL )" )
 
-            # Link new objects to existing root objects
-            # TODO : test this with multiple processing versions and multiple#
-            #   objects that match!!!
-            cursor.execute( "UPDATE temp_new_diaobject tno SET rootid=o.rootid "
-                            "FROM diaobject o "
-                            "WHERE o.base_procver_id=tno.base_procver_id "
-                            " AND q3c_radial_query(o.ra, o.dec, tno.ra, tno.dec, %(rad)s)",
-                            { 'rad': self.object_match_radius/3600. } )
+            # Assign rootid using spatial_id for each new object
+            # Each object gets its own unique rootid based on (ra, dec, mjd, procver, data_release)
+            cursor.execute( "SELECT diaobjectid, ra, dec, validitystartmjdtai FROM temp_new_diaobject" )
+            rows = cursor.fetchall()
 
-            # Create new root objects
-            cursor.execute( "CREATE TEMP TABLE temp_new_root_obj (id UUID)" )
-            cursor.execute( "INSERT INTO temp_new_root_obj "
-                            "( SELECT gen_random_uuid() FROM temp_new_diaobject "
-                            "  WHERE rootid IS NULL )" )
-            # This next one is byzantine.  I'm trying to say, "hey, there are n
-            # rows in tmp_new_diaobject that have NULL rootid, and I've just
-            # created tmp_new_root_obj with n rows, now just fill those n NULL rootids
-            # from the n rows in tmp_new_root_obj".  There must be a less byzantine
-            # way to do this.
-            cursor.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id "
-                            "FROM ( ( SELECT id, ROW_NUMBER() OVER () AS n FROM temp_new_root_obj ) tnro "
-                            "       INNER JOIN "
-                            "       ( SELECT diaobjectid, rootid, ROW_NUMBER() OVER () AS n FROM "
-                            "         ( SELECT diaobjectid, rootid FROM temp_new_diaobject WHERE rootid IS NULL ) subq "
-                            "       ) tnd "
-                            "       ON tnro.n=tnd.n ) r "
-                            "WHERE r.diaobjectid=tno.diaobjectid" )
+            for diaobjectid, ra, dec, mjd in rows:
+                rootid = generate_spatial_id( ra, dec, mjd, self.procver, self.data_release )
+                cursor.execute( "UPDATE temp_new_diaobject SET rootid = %s WHERE diaobjectid = %s",
+                               ( str(rootid), diaobjectid ) )
 
-            # Add the new root diaobjects
-            cursor.execute( "INSERT INTO root_diaobject ( SELECT * FROM temp_new_root_obj )" )
+            # Add to root_diaobject table (for backward compatibility during migration)
+            # Uses ON CONFLICT DO NOTHING since same spatial_id may be generated for
+            # objects at very similar positions
+            cursor.execute( "INSERT INTO root_diaobject (id) "
+                            "SELECT DISTINCT rootid FROM temp_new_diaobject "
+                            "ON CONFLICT DO NOTHING" )
             nroot = cursor.rowcount
 
-            # Add the new objects.
+            # Add the new objects
             cursor.execute( "INSERT INTO diaobject ( SELECT * FROM temp_new_diaobject )" )
             nobjs = cursor.rowcount
 
