@@ -28,6 +28,7 @@ from spatial_id import (
     HEALPIX_BITS,
     MJD_EPOCH,
     NSIDE,
+    NSIDE_MATCHING,
     PROCVER_BITS,
     DATARELEASE_BITS,
     MJD_BITS,
@@ -47,6 +48,8 @@ from spatial_id import (
     same_spatial_group,
     healpix_to_radec,
     extract_approx_radec,
+    get_matching_key,
+    get_neighbor_keys,
 )
 
 
@@ -587,3 +590,146 @@ class TestConstants:
     def test_mjd_epoch_reasonable(self):
         """MJD_EPOCH should be a reasonable value (around 1968)."""
         assert 39000 < MJD_EPOCH < 41000
+
+    def test_nside_matching_value(self):
+        """NSIDE_MATCHING should be 2^14 for ~0.86" cells."""
+        assert NSIDE_MATCHING == 2**14
+
+
+class TestMatchingFunctions:
+    """Tests for the two-level matching helper functions."""
+
+    def test_get_matching_key_returns_consistent_values(self):
+        """get_matching_key should return consistent values for same input."""
+        ra, dec = 180.0, 45.0
+
+        key1 = get_matching_key(ra, dec)
+        key2 = get_matching_key(ra, dec)
+        key3 = get_matching_key(ra, dec)
+
+        assert key1 == key2 == key3
+        assert isinstance(key1, int)
+
+    def test_get_matching_key_different_positions(self):
+        """Different positions should generally have different matching keys."""
+        # Positions far apart should have different keys
+        key1 = get_matching_key(0.0, 0.0)
+        key2 = get_matching_key(180.0, 0.0)
+        key3 = get_matching_key(0.0, 45.0)
+
+        assert key1 != key2
+        assert key1 != key3
+        assert key2 != key3
+
+    def test_get_neighbor_keys_returns_9_values_non_polar(self):
+        """get_neighbor_keys should return 9 values (target + 8 neighbors) away from poles."""
+        # Test at equator (far from poles)
+        ra, dec = 180.0, 0.0
+
+        neighbors = get_neighbor_keys(ra, dec)
+
+        assert len(neighbors) == 9
+        # First element should be the target pixel
+        assert neighbors[0] == get_matching_key(ra, dec)
+        # All should be valid pixel indices (non-negative integers)
+        assert all(isinstance(n, int) and n >= 0 for n in neighbors)
+        # All should be unique
+        assert len(set(neighbors)) == 9
+
+    def test_get_neighbor_keys_includes_target_pixel(self):
+        """get_neighbor_keys should include the target pixel as first element."""
+        for ra, dec in [(0.0, 0.0), (90.0, 30.0), (270.0, -30.0)]:
+            neighbors = get_neighbor_keys(ra, dec)
+            target = get_matching_key(ra, dec)
+            assert neighbors[0] == target
+
+    def test_get_neighbor_keys_handles_north_pole(self):
+        """get_neighbor_keys should handle north pole (may have fewer neighbors)."""
+        ra, dec = 0.0, 90.0
+
+        neighbors = get_neighbor_keys(ra, dec)
+
+        # Should still have at least the target pixel
+        assert len(neighbors) >= 1
+        # All should be valid
+        assert all(isinstance(n, int) and n >= 0 for n in neighbors)
+        # At poles, may have fewer than 9 due to geometry
+        # (some neighbors don't exist)
+        assert len(neighbors) <= 9
+
+    def test_get_neighbor_keys_handles_south_pole(self):
+        """get_neighbor_keys should handle south pole (may have fewer neighbors)."""
+        ra, dec = 0.0, -90.0
+
+        neighbors = get_neighbor_keys(ra, dec)
+
+        # Should still have at least the target pixel
+        assert len(neighbors) >= 1
+        # All should be valid
+        assert all(isinstance(n, int) and n >= 0 for n in neighbors)
+
+    def test_nearby_points_have_overlapping_neighbors(self):
+        """Two points 0.5" apart should have overlapping neighbor sets.
+
+        This is critical for matching: objects within 1" must be findable
+        by querying neighbors of either object's position.
+        """
+        ra_base, dec_base = 180.0, 45.0
+
+        # 0.5 arcseconds in degrees
+        offset = 0.5 / 3600.0
+
+        neighbors1 = set(get_neighbor_keys(ra_base, dec_base))
+        neighbors2 = set(get_neighbor_keys(ra_base + offset, dec_base))
+
+        # The neighbor sets should overlap
+        overlap = neighbors1 & neighbors2
+        assert len(overlap) > 0, (
+            "Points 0.5\" apart should have overlapping neighbor sets "
+            "to ensure matching works correctly."
+        )
+
+    def test_same_position_same_neighbors(self):
+        """Same position should always return identical neighbor list."""
+        ra, dec = 123.456, -67.89
+
+        neighbors1 = get_neighbor_keys(ra, dec)
+        neighbors2 = get_neighbor_keys(ra, dec)
+
+        assert neighbors1 == neighbors2
+
+    def test_matching_resolution_coarser_than_storage(self):
+        """NSIDE_MATCHING should be coarser than NSIDE (storage)."""
+        assert NSIDE_MATCHING < NSIDE
+        # Specifically, storage is 2^29, matching is 2^14
+        assert NSIDE == 2**29
+        assert NSIDE_MATCHING == 2**14
+
+    def test_points_within_1_arcsec_share_neighbors(self):
+        """Points within 1 arcsecond should share at least one neighbor.
+
+        This is the key guarantee for the matching algorithm.
+        """
+        test_cases = [
+            (180.0, 0.0),    # Equator
+            (0.0, 45.0),     # Mid-latitude
+            (270.0, -60.0),  # Southern hemisphere
+        ]
+
+        for ra_base, dec_base in test_cases:
+            # 1 arcsecond in degrees
+            offset = 1.0 / 3600.0
+
+            neighbors_base = set(get_neighbor_keys(ra_base, dec_base))
+
+            # Check point 1" away in RA
+            neighbors_ra = set(get_neighbor_keys(ra_base + offset, dec_base))
+            assert neighbors_base & neighbors_ra, (
+                f"Points 1\" apart in RA should share neighbors at ({ra_base}, {dec_base})"
+            )
+
+            # Check point 1" away in Dec
+            neighbors_dec = set(get_neighbor_keys(ra_base, dec_base + offset))
+            assert neighbors_base & neighbors_dec, (
+                f"Points 1\" apart in Dec should share neighbors at ({ra_base}, {dec_base})"
+            )

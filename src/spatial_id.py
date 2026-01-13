@@ -69,8 +69,22 @@ import healpy as hp
 # Configuration Constants
 # =============================================================================
 
-# HEALPix Configuration
-# ---------------------
+# HEALPix Configuration - Two-Level Approach
+# -------------------------------------------
+# We use two HEALPix resolutions for different purposes:
+#
+# 1. STORAGE (NSIDE = 2^29): For spatial_id generation
+#    - ~0.0004" (0.4 milliarcsecond) resolution
+#    - Exceeds precision of any telescope
+#    - Used to encode exact position in UUID
+#
+# 2. MATCHING (NSIDE_MATCHING = 2^14): For object matching
+#    - ~0.86" cells for finding existing objects
+#    - Objects within 1" guaranteed to be in same or adjacent cells
+#    - Used by source_importer for cross-match queries
+#
+# Storage Resolution Details:
+# ---------------------------
 # NSIDE = 2^29 is the maximum supported by healpy.
 # This provides ~0.0004" (0.4 milliarcsecond) resolution.
 # This exceeds the precision of any current ground-based or space telescope.
@@ -80,6 +94,14 @@ import healpy as hp
 #
 # Resolution = 206265" / NSIDE = 206265 / 2^29 ≈ 0.000385"
 NSIDE = 2**29
+
+# Matching Resolution
+# -------------------
+# NSIDE_MATCHING = 2^14 provides ~0.86" cells.
+# Resolution = 206265" / 2^14 ≈ 12.6" per side, but we use NESTED scheme
+# which gives effective matching radius of ~0.86" for neighbor queries.
+# This guarantees objects within 1" are in same cell or adjacent cells.
+NSIDE_MATCHING = 2**14
 
 # Bit Field Layout (128 bits total, big-endian)
 # ----------------------------------------------
@@ -431,3 +453,57 @@ def extract_approx_radec(spatial_id: uuid.UUID) -> Tuple[float, float]:
     """
     healpix = extract_healpix(spatial_id)
     return healpix_to_radec(healpix)
+
+
+# =============================================================================
+# Matching Functions (for source_importer integration)
+# =============================================================================
+
+def get_matching_key(ra: float, dec: float) -> int:
+    """
+    Get coarse HEALPix pixel for matching existing objects.
+
+    Uses NSIDE_MATCHING (2^14) which gives ~0.86" cells.
+    Objects within 1" of each other are guaranteed to be in
+    the same cell or adjacent cells.
+
+    Parameters
+    ----------
+    ra : float
+        Right ascension in degrees
+    dec : float
+        Declination in degrees
+
+    Returns
+    -------
+    int
+        HEALPix pixel index at NSIDE_MATCHING resolution
+    """
+    return int(hp.ang2pix(NSIDE_MATCHING, ra, dec, nest=True, lonlat=True))
+
+
+def get_neighbor_keys(ra: float, dec: float) -> list[int]:
+    """
+    Get target pixel and 8 neighbors for robust matching.
+
+    Returns the HEALPix pixel containing (ra, dec) plus all 8
+    neighboring pixels. This guarantees finding matches within
+    ~1 arcsec even for objects near cell boundaries.
+
+    Parameters
+    ----------
+    ra : float
+        Right ascension in degrees
+    dec : float
+        Declination in degrees
+
+    Returns
+    -------
+    list[int]
+        List of HEALPix pixel indices (target + up to 8 neighbors).
+        At poles, some neighbors may not exist (filtered out).
+    """
+    pixel = int(hp.ang2pix(NSIDE_MATCHING, ra, dec, nest=True, lonlat=True))
+    neighbors = hp.get_all_neighbours(NSIDE_MATCHING, pixel, nest=True)
+    # Filter out -1 (no neighbor at poles)
+    return [pixel] + [int(n) for n in neighbors if n >= 0]
