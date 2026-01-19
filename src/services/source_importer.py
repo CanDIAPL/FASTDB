@@ -314,7 +314,9 @@ class SourceImporter:
             nroot = cursor.rowcount
 
             # Add the new objects
-            cursor.execute( "INSERT INTO diaobject ( SELECT * FROM temp_new_diaobject )" )
+            # ON CONFLICT DO NOTHING handles concurrent imports of the same objects
+            cursor.execute( "INSERT INTO diaobject ( SELECT * FROM temp_new_diaobject ) "
+                            "ON CONFLICT (diaobjectid) DO NOTHING" )
             nobjs = cursor.rowcount
 
             if commit:
@@ -477,9 +479,9 @@ def main():
     si = SourceImporter( args.base_processing_version, objpv )
     with db.MG() as mg:
         collection = db.get_mongo_collection( mg, args.collection )
-        nobj, nsrc, nfrc = si.import_from_mongo( collection )
+        nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
 
-    print( f"Imported {nobj} objects, {nsrc} sources, {nfrc} forced sources" )
+    print( f"Imported {nobj} objects ({nroot} roots), {nsrc} sources, {nfrc} forced sources" )
 
 
 # ======================================================================
