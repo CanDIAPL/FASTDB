@@ -32,7 +32,7 @@ ON CONFLICT DO NOTHING;
 -- This groups all observations at the same position regardless of time/procver.
 --
 -- Usage:
---   SELECT * FROM diaobject WHERE spatial_group(rootid) = spatial_group(target_id);
+--   SELECT * FROM diaobject WHERE spatial_group(spatial_id) = spatial_group(target_id);
 --
 CREATE OR REPLACE FUNCTION spatial_group(sid UUID)
 RETURNS BIGINT AS $$
@@ -63,12 +63,5 @@ COMMENT ON FUNCTION spatial_group(UUID) IS
     'Extract spatial grouping prefix (top 48 bits of HEALPix = 48 bits) from spatial_id UUID. '
     'Groups all observations at the same position (~0.05" resolution) regardless of time/procver.';
 
--- Index on rootid using spatial_group for efficient grouping queries
--- rootid will now contain spatial_id values (deterministic UUIDs encoding position)
--- This allows: WHERE spatial_group(rootid) = spatial_group(target)
-CREATE INDEX IF NOT EXISTS idx_diaobject_spatial_group
-ON diaobject(spatial_group(rootid));
-
-COMMENT ON INDEX idx_diaobject_spatial_group IS
-    'Index for efficient spatial grouping queries using spatial_group(rootid). '
-    'Objects at the same sky position (within ~0.05\") share the same group prefix.';
+-- Note: The spatial_group index is created in 2026-01-12_001_add_spatial_id.sql
+-- after the spatial_id column is added to diaobject.

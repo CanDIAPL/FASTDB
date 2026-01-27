@@ -68,15 +68,15 @@ COMMENT ON FUNCTION _mg_xy_to_morton(BIGINT, BIGINT) IS
 
 -- =============================================================================
 -- Main function: matching_group
--- Extract coarse HEALPix cell from rootid for proximity queries
+-- Extract coarse HEALPix cell from spatial_id for proximity queries
 -- =============================================================================
-CREATE OR REPLACE FUNCTION matching_group(rootid UUID) RETURNS BIGINT AS $$
+CREATE OR REPLACE FUNCTION matching_group(sid UUID) RETURNS BIGINT AS $$
 DECLARE
     uuid_bytes BYTEA;
     high64 BIGINT;
 BEGIN
     -- Convert UUID to binary representation (16 bytes, big-endian)
-    uuid_bytes := uuid_send(rootid);
+    uuid_bytes := uuid_send(sid);
 
     -- Extract high64 (bytes 0-7, contains HEALPix at NSIDE=2^29)
     high64 := (get_byte(uuid_bytes, 0)::BIGINT << 56)
@@ -95,7 +95,7 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE;
 
 COMMENT ON FUNCTION matching_group(UUID) IS
-    'Extract coarse HEALPix cell (NSIDE=2^14, ~12.6" cells) from rootid for proximity queries. '
+    'Extract coarse HEALPix cell (NSIDE=2^14, ~12.6" cells) from spatial_id for proximity queries. '
     'Objects within 1 arcsec are guaranteed to be in same cell or adjacent cells. '
     'Use with matching_group_neighbors() for robust matching across cell boundaries.';
 
@@ -155,17 +155,18 @@ COMMENT ON FUNCTION matching_group_neighbors(BIGINT) IS
     'Get a matching_group value and its 8 HEALPix neighbors for proximity queries. '
     'Returns array of up to 9 matching_group values. Objects within 1 arcsec of a '
     'position are guaranteed to be in one of these cells (except at base pixel boundaries). '
-    'Usage: WHERE matching_group(rootid) = ANY(matching_group_neighbors(target_mg))';
+    'Usage: WHERE matching_group(spatial_id) = ANY(matching_group_neighbors(target_mg))';
 
 -- =============================================================================
 -- Index for efficient matching_group queries (default 10" precision)
 -- =============================================================================
 CREATE INDEX IF NOT EXISTS idx_diaobject_matching_group
-ON diaobject(matching_group(rootid));
+ON diaobject(matching_group(spatial_id));
 
 COMMENT ON INDEX idx_diaobject_matching_group IS
     'Index for efficient proximity queries using matching_group(rootid). '
-    'Enables fast lookup of objects within ~1 arcsec using matching_group_neighbors().';
+    'Enables fast lookup of objects within ~1 arcsec using matching_group_neighbors(). '
+    'Uses spatial_id column (deterministic UUID encoding position).';
 
 -- =============================================================================
 -- Parameterized matching: matching_group_at_precision
@@ -221,7 +222,7 @@ COMMENT ON FUNCTION _mg_shift_bits_for_nside(BIGINT) IS
 -- Main parameterized function: matching_group_at_precision
 -- Extract matching group at specified precision (in arcseconds)
 -- =============================================================================
-CREATE OR REPLACE FUNCTION matching_group_at_precision(rootid UUID, arcsec FLOAT DEFAULT 10.0)
+CREATE OR REPLACE FUNCTION matching_group_at_precision(sid UUID, arcsec FLOAT DEFAULT 10.0)
 RETURNS BIGINT AS $$
 DECLARE
     uuid_bytes BYTEA;
@@ -230,7 +231,7 @@ DECLARE
     shift_bits INT;
 BEGIN
     -- Convert UUID to binary representation
-    uuid_bytes := uuid_send(rootid);
+    uuid_bytes := uuid_send(sid);
 
     -- Extract high64 (bytes 0-7, contains HEALPix at NSIDE=2^29)
     high64 := (get_byte(uuid_bytes, 0)::BIGINT << 56)

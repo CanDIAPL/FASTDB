@@ -31,7 +31,8 @@ class TestDiaObject( BaseTestDB ):
             'nearbyextobj3',
             'nearbyextobj3sep',
             'nearbylowzgal',
-            'nearbylowzgalsep'
+            'nearbylowzgalsep',
+            'spatial_id'
         }
         self.safe_to_modify = [
             'ra',

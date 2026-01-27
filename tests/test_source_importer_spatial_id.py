@@ -2,10 +2,11 @@
 Tests for spatial_id integration in source_importer.
 
 These tests verify that:
-1. Each diaobject gets a deterministic rootid based on (ra, dec, mjd, procver, data_release)
-2. Same data imported twice produces identical rootids
+1. Each diaobject gets a deterministic spatial_id based on (ra, dec, mjd, procver, data_release)
+2. Same data imported twice produces identical spatial_ids
 3. spatial_group() function works for grouping objects at same position
-4. Different observations of same object have same spatial_group but different rootid
+4. Different observations of same object have same spatial_group but different spatial_id
+5. rootid remains a random UUID with FK to root_diaobject (tested via DB integration)
 """
 
 import uuid
@@ -33,8 +34,8 @@ class TestSpatialIdDeterminism:
 
         assert sid1 == sid2
 
-    def test_different_mjd_different_rootid(self):
-        """Different observation times produce different rootids."""
+    def test_different_mjd_different_spatial_id(self):
+        """Different observation times produce different spatial_ids."""
         ra, dec = 180.0, 45.0
         procver, dr = 0, 0
 
@@ -51,7 +52,7 @@ class TestSpatialIdDeterminism:
         sid1 = generate_spatial_id(ra, dec, 60000.0, procver, dr)
         sid2 = generate_spatial_id(ra, dec, 60001.0, procver, dr)
 
-        # Different rootid
+        # Different spatial_id
         assert sid1 != sid2
 
         # Same spatial_group (position-only grouping)
@@ -65,7 +66,7 @@ class TestSpatialIdDeterminism:
         sid1 = generate_spatial_id(ra, dec, mjd, 0, dr)
         sid2 = generate_spatial_id(ra, dec, mjd, 100, dr)
 
-        # Different rootid
+        # Different spatial_id
         assert sid1 != sid2
 
         # Same spatial_group
@@ -79,7 +80,7 @@ class TestSpatialIdDeterminism:
         sid1 = generate_spatial_id(ra, dec, mjd, procver, 0)  # realtime
         sid2 = generate_spatial_id(ra, dec, mjd, procver, 1)  # DR1
 
-        # Different rootid
+        # Different spatial_id
         assert sid1 != sid2
 
         # Same spatial_group
@@ -122,33 +123,32 @@ class TestImportScenarios:
     """Test scenarios that will occur in source_importer."""
 
     def test_idempotent_import_scenario(self):
-        """Simulate importing same object twice - should get same rootid."""
-        # Simulating what source_importer will do
+        """Simulate importing same object twice - should get same spatial_id."""
         ra, dec, mjd = 42.0, 13.0, 50000.0
         procver, dr = 0, 0
 
         # First import
-        rootid1 = generate_spatial_id(ra, dec, mjd, procver, dr)
+        sid1 = generate_spatial_id(ra, dec, mjd, procver, dr)
 
         # Second import (same data)
-        rootid2 = generate_spatial_id(ra, dec, mjd, procver, dr)
+        sid2 = generate_spatial_id(ra, dec, mjd, procver, dr)
 
-        # Should be identical - enables ON CONFLICT DO NOTHING
-        assert rootid1 == rootid2
+        # Should be identical
+        assert sid1 == sid2
 
     def test_multi_master_scenario(self):
-        """Simulate importing on different masters - should get same rootid."""
+        """Simulate importing on different masters - should get same spatial_id."""
         ra, dec, mjd = 42.0, 13.0, 50000.0
         procver, dr = 0, 0
 
         # Master A imports
-        rootid_a = generate_spatial_id(ra, dec, mjd, procver, dr)
+        sid_a = generate_spatial_id(ra, dec, mjd, procver, dr)
 
         # Master B imports same data
-        rootid_b = generate_spatial_id(ra, dec, mjd, procver, dr)
+        sid_b = generate_spatial_id(ra, dec, mjd, procver, dr)
 
-        # Should be identical - no UUID conflicts during replication
-        assert rootid_a == rootid_b
+        # Should be identical - deterministic across masters
+        assert sid_a == sid_b
 
     def test_multiple_observations_grouping(self):
         """Multiple observations of same object can be grouped by spatial_group."""
@@ -163,7 +163,7 @@ class TestImportScenarios:
             generate_spatial_id(ra, dec, 60030.0, procver, dr),
         ]
 
-        # All have different rootids
+        # All have different spatial_ids
         assert len(set(observations)) == 4
 
         # All have same spatial_group

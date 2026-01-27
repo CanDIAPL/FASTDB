@@ -64,7 +64,7 @@ class SourceImporter:
 
 
     def __init__( self, base_processing_version, object_base_processing_version,
-                  procver=0, data_release=0 ):
+                  object_match_radius=1., procver=0, data_release=0 ):
         """Create a SourceImporter.
 
         Parameters
@@ -76,6 +76,10 @@ class SourceImporter:
           object_base_processing_version : UUID or str
             The processing version for objects.
 
+          object_match_radius : float, default 1.
+            Objects within this many arcsec of an existing object will be considered
+            the same root_diaobject.
+
           procver : int, default 0
             Processing version compact ID for spatial_id encoding [0, 65535].
 
@@ -86,6 +90,7 @@ class SourceImporter:
         """
         self.base_processing_version = util.base_procver_id( base_processing_version )
         self.object_base_processing_version = util.base_procver_id( object_base_processing_version )
+        self.object_match_radius = float( object_match_radius )
         self.procver = procver
         self.data_release = data_release
 
@@ -251,11 +256,11 @@ class SourceImporter:
 
     def import_objects_from_collection( self, collection, t0=None, t1=None, batchsize=10000,
                                         conn=None, commit=True ):
-        """Import diaobject records from MongoDB using spatial_id for rootid.
+        """Import diaobject records from MongoDB.
 
-        Each diaobject gets a deterministic rootid based on its (ra, dec, mjd, procver, data_release).
-        Same data imported multiple times produces identical rootids. Grouping by position
-        happens at query time via spatial_group(rootid).
+        Uses cone search to match new objects to existing root objects.
+        Unmatched objects get new random UUID rootids with entries in root_diaobject.
+        Each object also gets a deterministic spatial_id based on (ra, dec, mjd, procver, data_release).
 
         Parameters
         ----------
@@ -280,7 +285,7 @@ class SourceImporter:
             Number of objects imported.
 
           nroot : int
-            Number of root_diaobject entries created (for backward compat).
+            Number of root_diaobject entries created.
         """
         with db.DB( conn ) as pqconn:
             self.read_mongo_objects( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
@@ -295,26 +300,41 @@ class SourceImporter:
                             "    o.diaobjectid=tdi.diaobjectid AND o.base_procver_id=tdi.base_procver_id "
                             "  WHERE o.diaobjectid IS NULL )" )
 
-            # Assign rootid using spatial_id for each new object
-            # Each object gets its own unique rootid based on (ra, dec, mjd, procver, data_release)
+            # Link new objects to existing root objects via cone search
+            cursor.execute( "UPDATE temp_new_diaobject tno SET rootid=o.rootid "
+                            "FROM diaobject o "
+                            "WHERE o.base_procver_id=tno.base_procver_id "
+                            " AND q3c_radial_query(o.ra, o.dec, tno.ra, tno.dec, %(rad)s)",
+                            { 'rad': self.object_match_radius/3600. } )
+
+            # Create new root objects for unmatched objects
+            cursor.execute( "CREATE TEMP TABLE temp_new_root_obj (id UUID)" )
+            cursor.execute( "INSERT INTO temp_new_root_obj "
+                            "( SELECT gen_random_uuid() FROM temp_new_diaobject "
+                            "  WHERE rootid IS NULL )" )
+            cursor.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id "
+                            "FROM ( ( SELECT id, ROW_NUMBER() OVER () AS n FROM temp_new_root_obj ) tnro "
+                            "       INNER JOIN "
+                            "       ( SELECT diaobjectid, rootid, ROW_NUMBER() OVER () AS n FROM "
+                            "         ( SELECT diaobjectid, rootid FROM temp_new_diaobject WHERE rootid IS NULL ) subq "
+                            "       ) tnd "
+                            "       ON tnro.n=tnd.n ) r "
+                            "WHERE r.diaobjectid=tno.diaobjectid" )
+
+            # Add the new root diaobjects
+            cursor.execute( "INSERT INTO root_diaobject ( SELECT * FROM temp_new_root_obj )" )
+            nroot = cursor.rowcount
+
+            # Generate spatial_id for each new object
             cursor.execute( "SELECT diaobjectid, ra, dec, validitystartmjdtai FROM temp_new_diaobject" )
             rows = cursor.fetchall()
 
             for diaobjectid, ra, dec, mjd in rows:
-                rootid = generate_spatial_id( ra, dec, mjd, self.procver, self.data_release )
-                cursor.execute( "UPDATE temp_new_diaobject SET rootid = %s WHERE diaobjectid = %s",
-                               ( str(rootid), diaobjectid ) )
-
-            # Add to root_diaobject table (for backward compatibility during migration)
-            # Uses ON CONFLICT DO NOTHING since same spatial_id may be generated for
-            # objects at very similar positions
-            cursor.execute( "INSERT INTO root_diaobject (id) "
-                            "SELECT DISTINCT rootid FROM temp_new_diaobject "
-                            "ON CONFLICT DO NOTHING" )
-            nroot = cursor.rowcount
+                spatial_id = generate_spatial_id( ra, dec, mjd, self.procver, self.data_release )
+                cursor.execute( "UPDATE temp_new_diaobject SET spatial_id = %s WHERE diaobjectid = %s",
+                               ( str(spatial_id), diaobjectid ) )
 
             # Add the new objects
-            # ON CONFLICT DO NOTHING handles concurrent imports of the same objects
             cursor.execute( "INSERT INTO diaobject ( SELECT * FROM temp_new_diaobject ) "
                             "ON CONFLICT (diaobjectid) DO NOTHING" )
             nobjs = cursor.rowcount
@@ -408,9 +428,8 @@ class SourceImporter:
 
         Returns
         -------
-          nobj, nsrc, nfrc
-
-          Number of objects, sources, and forced sources added to the PostgreSQL database.
+          nobj, nsrc, nfrc : int
+            Number of objects, sources, and forced sources added to the PostgreSQL database.
 
         """
 
@@ -436,7 +455,7 @@ class SourceImporter:
             cursor.execute( "SET CONSTRAINTS fk_diasource_diaobjectid DEFERRED" )
             cursor.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobjectid DEFERRED" )
 
-            nobj, nroot = self.import_objects_from_collection( collection, t0, t1, conn=pqconn, commit=False )
+            nobj, _nroot = self.import_objects_from_collection( collection, t0, t1, conn=pqconn, commit=False )
             nsrc = self.import_sources_from_collection( collection, t0, t1, conn=pqconn, commit=False )
             nprvsrc = self.import_prvsources_from_collection( collection, t0, t1, conn=pqconn, commit=False )
             nprvfrc = self.import_prvforcedsources_from_collection( collection, t0, t1, conn=pqconn, commit=False )
@@ -455,7 +474,7 @@ class SourceImporter:
             # The timestamp will be updated if and only if everything imported.
             pqconn.commit()
 
-        return nobj, nroot, nsrc + nprvsrc, nprvfrc
+        return nobj, nsrc + nprvsrc, nprvfrc
 
 
 # ======================================================================
@@ -479,9 +498,9 @@ def main():
     si = SourceImporter( args.base_processing_version, objpv )
     with db.MG() as mg:
         collection = db.get_mongo_collection( mg, args.collection )
-        nobj, nroot, nsrc, nfrc = si.import_from_mongo( collection )
+        nobj, nsrc, nfrc = si.import_from_mongo( collection )
 
-    print( f"Imported {nobj} objects ({nroot} roots), {nsrc} sources, {nfrc} forced sources" )
+    print( f"Imported {nobj} objects, {nsrc} sources, {nfrc} forced sources" )
 
 
 # ======================================================================
