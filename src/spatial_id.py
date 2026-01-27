@@ -459,11 +459,17 @@ def extract_approx_radec(spatial_id: uuid.UUID) -> Tuple[float, float]:
 # Matching Functions (for source_importer integration)
 # =============================================================================
 
+# To convert from storage NSIDE (2^29) to matching NSIDE (2^14):
+# Level difference = 29 - 14 = 15 levels
+# Each level is 4x pixels, so shift right by 2*15 = 30 bits
+_MATCHING_SHIFT_BITS = 2 * (29 - 14)  # 30 bits
+
+
 def get_matching_key(ra: float, dec: float) -> int:
     """
     Get coarse HEALPix pixel for matching existing objects.
 
-    Uses NSIDE_MATCHING (2^14) which gives ~0.86" cells.
+    Uses NSIDE_MATCHING (2^14) which gives ~12.6" cells.
     Objects within 1" of each other are guaranteed to be in
     the same cell or adjacent cells.
 
@@ -507,3 +513,280 @@ def get_neighbor_keys(ra: float, dec: float) -> list[int]:
     neighbors = hp.get_all_neighbours(NSIDE_MATCHING, pixel, nest=True)
     # Filter out -1 (no neighbor at poles)
     return [pixel] + [int(n) for n in neighbors if n >= 0]
+
+
+def matching_group_int(spatial_id: uuid.UUID) -> int:
+    """
+    Extract coarse matching group from spatial_id for proximity queries.
+
+    Uses NSIDE_MATCHING (2^14) resolution which gives ~12.6" cells.
+    Objects within 1" are guaranteed to be in same cell or adjacent cells.
+
+    This is coarser than spatial_group_int() and is designed for finding
+    nearby objects, not for exact position matching.
+
+    Resolution comparison:
+        - spatial_group_int(): ~0.05" (NSIDE=2^22 equivalent) - exact matching
+        - matching_group_int(): ~12.6" (NSIDE=2^14) - proximity queries
+
+    Parameters
+    ----------
+    spatial_id : uuid.UUID
+        Spatial identifier (rootid)
+
+    Returns
+    -------
+    int
+        HEALPix pixel index at NSIDE_MATCHING resolution
+
+    Examples
+    --------
+    >>> # Two objects 0.8" apart should have same or adjacent matching_group
+    >>> sid1 = generate_spatial_id(120.0, 45.0, 60000.0, 0, 0)
+    >>> sid2 = generate_spatial_id(120.000222, 45.0, 60000.5, 0, 0)  # 0.8" east
+    >>> mg1 = matching_group_int(sid1)
+    >>> mg2 = matching_group_int(sid2)
+    >>> # They may be same or neighbors - use matching_group_neighbors to check
+    """
+    healpix = extract_healpix(spatial_id)
+    # Convert from NSIDE=2^29 to NSIDE=2^14 by shifting right 30 bits
+    return healpix >> _MATCHING_SHIFT_BITS
+
+
+def matching_group_from_healpix(healpix: int) -> int:
+    """
+    Convert full-resolution HEALPix to matching group.
+
+    Parameters
+    ----------
+    healpix : int
+        HEALPix index at NSIDE=2^29
+
+    Returns
+    -------
+    int
+        HEALPix pixel index at NSIDE_MATCHING (2^14) resolution
+    """
+    return healpix >> _MATCHING_SHIFT_BITS
+
+
+def matching_group_neighbors(matching_group: int) -> list[int]:
+    """
+    Get a matching group and its 8 neighbors.
+
+    Use this to find all objects that could be within ~1" of a position.
+    Query for objects where matching_group_int(rootid) is in this list.
+
+    Parameters
+    ----------
+    matching_group : int
+        Matching group from matching_group_int()
+
+    Returns
+    -------
+    list[int]
+        List of matching group values (target + up to 8 neighbors).
+        At poles, some neighbors may not exist (filtered out).
+
+    Examples
+    --------
+    >>> mg = matching_group_int(some_rootid)
+    >>> neighbors = matching_group_neighbors(mg)
+    >>> # Query: WHERE matching_group_int(rootid) = ANY(neighbors)
+    """
+    neighbors = hp.get_all_neighbours(NSIDE_MATCHING, matching_group, nest=True)
+    # Filter out -1 (no neighbor at poles)
+    return [matching_group] + [int(n) for n in neighbors if n >= 0]
+
+
+def matching_group_neighbors_from_spatial_id(spatial_id: uuid.UUID) -> list[int]:
+    """
+    Get matching group neighbors directly from a spatial_id.
+
+    Convenience function combining matching_group_int and matching_group_neighbors.
+
+    Parameters
+    ----------
+    spatial_id : uuid.UUID
+        Spatial identifier (rootid)
+
+    Returns
+    -------
+    list[int]
+        List of matching group values (target + up to 8 neighbors)
+    """
+    mg = matching_group_int(spatial_id)
+    return matching_group_neighbors(mg)
+
+
+# =============================================================================
+# Precision-Parameterized Matching Functions
+# =============================================================================
+
+# Precomputed NSIDE values for common precision thresholds
+# Formula: NSIDE = 2^k where pixel_size ≈ 206265"/NSIDE ≥ precision
+# We want pixels large enough to contain objects within the precision radius
+_PRECISION_TO_NSIDE = {
+    1: 2**17,    # 1" precision → NSIDE=131072 → ~1.57" pixels
+    10: 2**14,   # 10" precision → NSIDE=16384 → ~12.6" pixels (default)
+    100: 2**11,  # 100" precision → NSIDE=2048 → ~100.7" pixels
+}
+
+
+def _nside_for_precision(arcsec: float) -> int:
+    """
+    Calculate appropriate NSIDE for a given precision in arcseconds.
+
+    Returns the largest power-of-2 NSIDE where pixel size >= precision.
+    This ensures objects within 'precision' arcseconds are in same or adjacent cells.
+
+    Parameters
+    ----------
+    arcsec : float
+        Desired precision in arcseconds (must be > 0)
+
+    Returns
+    -------
+    int
+        NSIDE value (power of 2) for the given precision
+
+    Examples
+    --------
+    >>> _nside_for_precision(1.0)
+    131072  # 2^17
+    >>> _nside_for_precision(10.0)
+    16384   # 2^14
+    >>> _nside_for_precision(100.0)
+    2048    # 2^11
+    """
+    if arcsec <= 0:
+        raise ValueError(f"Precision must be > 0, got {arcsec}")
+
+    # HEALPix pixel size ≈ 206265" / NSIDE
+    # We want pixel_size >= arcsec, so NSIDE <= 206265 / arcsec
+    max_nside = 206265.0 / arcsec
+
+    # Find largest power of 2 <= max_nside
+    # log2(max_nside) gives us the exponent
+    import math
+    exponent = int(math.log2(max_nside))
+
+    # Clamp to valid range: NSIDE must be >= 1 and <= 2^29 (storage NSIDE)
+    exponent = max(0, min(exponent, 29))
+
+    return 2 ** exponent
+
+
+def _shift_bits_for_nside(target_nside: int) -> int:
+    """
+    Calculate bit shift to convert from storage NSIDE (2^29) to target NSIDE.
+
+    Parameters
+    ----------
+    target_nside : int
+        Target NSIDE (must be power of 2 and <= 2^29)
+
+    Returns
+    -------
+    int
+        Number of bits to shift right
+    """
+    import math
+    target_exp = int(math.log2(target_nside))
+    # Level difference = 29 - target_exp
+    # Shift = 2 * level_difference (each level is 4x pixels = 2 bits)
+    return 2 * (29 - target_exp)
+
+
+def matching_group_at_precision(spatial_id: uuid.UUID, arcsec: float = 10.0) -> int:
+    """
+    Extract matching group at specified precision for proximity queries.
+
+    This function allows configurable precision for different use cases:
+    - 1" precision: Fine matching, small cells (~1.57")
+    - 10" precision: Default matching, medium cells (~12.6")
+    - 100" precision: Coarse matching, large cells (~100.7")
+
+    Objects within 'arcsec' of each other are guaranteed to be in the
+    same cell or adjacent cells.
+
+    Parameters
+    ----------
+    spatial_id : uuid.UUID
+        Spatial identifier (rootid)
+    arcsec : float, optional
+        Precision in arcseconds (default: 10.0)
+        Common values: 1, 10, 100
+
+    Returns
+    -------
+    int
+        HEALPix pixel index at the appropriate NSIDE for the precision
+
+    Examples
+    --------
+    >>> sid = generate_spatial_id(120.0, 45.0, 60000.0, 0, 0)
+    >>> matching_group_at_precision(sid, 1)    # 1" precision
+    >>> matching_group_at_precision(sid, 10)   # 10" precision (default)
+    >>> matching_group_at_precision(sid, 100)  # 100" precision
+    """
+    healpix = extract_healpix(spatial_id)
+    target_nside = _nside_for_precision(arcsec)
+    shift_bits = _shift_bits_for_nside(target_nside)
+    return healpix >> shift_bits
+
+
+def matching_group_neighbors_at_precision(
+    matching_group: int, arcsec: float = 10.0
+) -> list[int]:
+    """
+    Get a matching group and its 8 neighbors at specified precision.
+
+    Parameters
+    ----------
+    matching_group : int
+        Matching group from matching_group_at_precision()
+    arcsec : float, optional
+        Precision in arcseconds (must match what was used for matching_group)
+
+    Returns
+    -------
+    list[int]
+        List of matching group values (target + up to 8 neighbors)
+    """
+    target_nside = _nside_for_precision(arcsec)
+    neighbors = hp.get_all_neighbours(target_nside, matching_group, nest=True)
+    return [matching_group] + [int(n) for n in neighbors if n >= 0]
+
+
+def get_precision_info(arcsec: float) -> dict:
+    """
+    Get information about matching at a specific precision.
+
+    Useful for understanding the trade-offs of different precision settings.
+
+    Parameters
+    ----------
+    arcsec : float
+        Precision in arcseconds
+
+    Returns
+    -------
+    dict
+        Dictionary with:
+        - nside: NSIDE value used
+        - pixel_size_arcsec: Approximate pixel size in arcseconds
+        - total_pixels: Total number of pixels on the sphere
+        - shift_bits: Bits shifted from storage resolution
+    """
+    target_nside = _nside_for_precision(arcsec)
+    pixel_size = 206265.0 / target_nside
+    total_pixels = 12 * target_nside * target_nside
+    shift_bits = _shift_bits_for_nside(target_nside)
+
+    return {
+        "nside": target_nside,
+        "pixel_size_arcsec": pixel_size,
+        "total_pixels": total_pixels,
+        "shift_bits": shift_bits,
+    }
