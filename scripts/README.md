@@ -1,5 +1,10 @@
 # Scripts
 
+> **Prerequisites:** These scripts assume you have a running FASTDB environment
+> (PostgreSQL, MongoDB, shell pod). See [../helm/HELM_HOWTO.md](../helm/HELM_HOWTO.md)
+> for Kubernetes setup or [../docs/developers.rst](../docs/developers.rst) for
+> Docker Compose setup.
+
 ## Deployment
 
 ### `helm-deploy.sh`

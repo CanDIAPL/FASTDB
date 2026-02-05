@@ -11,7 +11,7 @@
 #   ./scripts/run_boundary_simulation.sh [namespace]
 #
 # Arguments:
-#   namespace - Kubernetes namespace (default: ccosta-dev)
+#   namespace - Kubernetes namespace (default: fastdb-local)
 #
 # Prerequisites:
 #   - kubectl configured and authenticated
@@ -20,7 +20,7 @@
 
 set -e
 
-NAMESPACE="${1:-ccosta-dev}"
+NAMESPACE="${1:-fastdb-local}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "============================================================================="
