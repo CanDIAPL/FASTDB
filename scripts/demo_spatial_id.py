@@ -182,20 +182,20 @@ def demo_old_vs_new_queries():
 
     -- Single query: Find all objects at this position
     SELECT diaobjectid, ra, dec FROM diaobject
-    WHERE spatial_group(rootid) = {group};
+    WHERE spatial_group(spatial_id) = {group};
 
     -- Get light curve for all observations at this position
     SELECT s.midpointtai, s.psflux, o.diaobjectid
     FROM diasource s
     JOIN diaobject o ON s.diaobjectid = o.diaobjectid
-    WHERE spatial_group(o.rootid) = {group}
+    WHERE spatial_group(o.spatial_id) = {group}
     ORDER BY s.midpointtai;
 
     Benefits:
     - No cone search needed - position encoded in UUID
     - No lookup table - grouping via bitmask
     - Multi-master safe - same coordinates = same spatial_id
-    - Indexed: CREATE INDEX ON diaobject(spatial_group(rootid))
+    - Indexed: CREATE INDEX ON diaobject(spatial_group(spatial_id))
     """)
     print()
 
@@ -239,13 +239,13 @@ def demo_precision_filtering():
     print("-" * 70)
     print(f"""
     -- Exact position match (~0.05")
-    WHERE spatial_group(rootid) = {group}
+    WHERE spatial_group(spatial_id) = {group}
 
     -- Objects within ~0.8" (shift 16 bits)
-    WHERE (spatial_group(rootid) >> 16) = ({group} >> 16)
+    WHERE (spatial_group(spatial_id) >> 16) = ({group} >> 16)
 
     -- Objects within ~50" (shift 32 bits)
-    WHERE (spatial_group(rootid) >> 32) = ({group} >> 32)
+    WHERE (spatial_group(spatial_id) >> 32) = ({group} >> 32)
     """)
     print()
 
@@ -288,7 +288,7 @@ def demo_time_filtering():
     SELECT o.diaobjectid, o.validitystartmjdtai, s.midpointtai, s.psflux
     FROM diaobject o
     JOIN diasource s ON s.diaobjectid = o.diaobjectid
-    WHERE spatial_group(o.rootid) = {spatial_group_int(obs1)}
+    WHERE spatial_group(o.spatial_id) = {spatial_group_int(obs1)}
       AND s.midpointtai BETWEEN 60500 AND 60650  -- Time range filter
     ORDER BY s.midpointtai;
 
@@ -320,8 +320,8 @@ def demo_workflow_summary():
 
     1. INGEST: When importing a diaobject
        ┌──────────────────────────────────────────────────────────────┐
-       │ rootid = generate_spatial_id(ra, dec, mjd, procver, dr)      │
-       │ INSERT INTO diaobject (rootid, ra, dec, ...) VALUES (...)    │
+       │ spatial_id = generate_spatial_id(ra, dec, mjd, procver, dr)   │
+       │ INSERT INTO diaobject (spatial_id, ra, dec, ...) VALUES (...) │
        └──────────────────────────────────────────────────────────────┘
 
     2. QUERY: When searching for objects
@@ -332,15 +332,15 @@ def demo_workflow_summary():
        │                                                              │
        │ # SQL: Find all objects at that position                     │
        │ SELECT * FROM diaobject                                      │
-       │ WHERE spatial_group(rootid) = :group                         │
+       │ WHERE spatial_group(spatial_id) = :group                     │
        └──────────────────────────────────────────────────────────────┘
 
-    3. MULTI-MASTER: Same inputs = Same rootid
+    3. MULTI-MASTER: Same inputs = Same spatial_id
        ┌──────────────────────────────────────────────────────────────┐
        │ Master A: generate_spatial_id(150.0, 2.0, 60500, 1, 0) = X   │
        │ Master B: generate_spatial_id(150.0, 2.0, 60500, 1, 0) = X   │
        │                                                              │
-       │ No conflicts! Both masters generate identical rootid.        │
+       │ No conflicts! Both masters generate identical spatial_id.    │
        └──────────────────────────────────────────────────────────────┘
     """)
 

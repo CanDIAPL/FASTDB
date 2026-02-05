@@ -109,8 +109,12 @@ class SourceImporter:
         # the root object nullable in the temp table.  (This is just because
         # when we import objects, they start that way, and only get root ids
         # after we figure out which ones need them and they've been created.)
+        # Same for spatial_id — it gets populated after the temp table is filled.
         if liketable == 'diaobject':
             pqcursor.execute( f"ALTER TABLE {temptable} ALTER COLUMN rootid DROP NOT NULL" )
+            pqcursor.execute( f"ALTER TABLE {temptable} ALTER COLUMN spatial_id DROP NOT NULL" )
+        elif liketable in ('diasource', 'diaforcedsource'):
+            pqcursor.execute( f"ALTER TABLE {temptable} ALTER COLUMN spatial_id DROP NOT NULL" )
 
         if ( t0 is not None ) or ( t1 is not None ):
             if ( t0 is not None ) and ( t1 is not None ):
@@ -322,7 +326,8 @@ class SourceImporter:
                             "WHERE r.diaobjectid=tno.diaobjectid" )
 
             # Add the new root diaobjects
-            cursor.execute( "INSERT INTO root_diaobject ( SELECT * FROM temp_new_root_obj )" )
+            cursor.execute( "INSERT INTO root_diaobject ( SELECT * FROM temp_new_root_obj ) "
+                            "ON CONFLICT (id) DO NOTHING" )
             nroot = cursor.rowcount
 
             # Generate spatial_id for each new object
@@ -336,7 +341,7 @@ class SourceImporter:
 
             # Add the new objects
             cursor.execute( "INSERT INTO diaobject ( SELECT * FROM temp_new_diaobject ) "
-                            "ON CONFLICT (diaobjectid) DO NOTHING" )
+                            "ON CONFLICT (spatial_id) DO NOTHING" )
             nobjs = cursor.rowcount
 
             if commit:
@@ -356,6 +361,12 @@ class SourceImporter:
             self.read_mongo_sources( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
 
             cursor = pqconn.cursor()
+            # Populate spatial_id from diaobject (not available in MongoDB)
+            cursor.execute( "UPDATE temp_diasource_import tsi "
+                            "SET spatial_id = o.spatial_id "
+                            "FROM diaobject o "
+                            "WHERE o.diaobjectid = tsi.diaobjectid "
+                            "  AND o.base_procver_id = tsi.base_procver_id" )
             cursor.execute( "INSERT INTO diasource ( SELECT * FROM temp_diasource_import ) ON CONFLICT DO NOTHING" )
             if commit:
                 pqconn.commit()
@@ -374,6 +385,12 @@ class SourceImporter:
             self.read_mongo_prvsources( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
 
             cursor = pqconn.cursor()
+            # Populate spatial_id from diaobject (not available in MongoDB)
+            cursor.execute( "UPDATE temp_prvdiasource_import tsi "
+                            "SET spatial_id = o.spatial_id "
+                            "FROM diaobject o "
+                            "WHERE o.diaobjectid = tsi.diaobjectid "
+                            "  AND o.base_procver_id = tsi.base_procver_id" )
             cursor.execute( "INSERT INTO diasource ( SELECT * FROM temp_prvdiasource_import ) ON CONFLICT DO NOTHING" )
             if commit:
                 pqconn.commit()
@@ -392,6 +409,12 @@ class SourceImporter:
             self.read_mongo_prvforcedsources( pqconn, collection, t0=t0, t1=t1, batchsize=batchsize )
 
             cursor = pqconn.cursor()
+            # Populate spatial_id from diaobject (not available in MongoDB)
+            cursor.execute( "UPDATE temp_prvdiaforcedsource_import tsi "
+                            "SET spatial_id = o.spatial_id "
+                            "FROM diaobject o "
+                            "WHERE o.diaobjectid = tsi.diaobjectid "
+                            "  AND o.base_procver_id = tsi.base_procver_id" )
             cursor.execute( "INSERT INTO diaforcedsource "
                             "( SELECT * FROM temp_prvdiaforcedsource_import ) "
                             "ON CONFLICT DO NOTHING" )
@@ -452,8 +475,8 @@ class SourceImporter:
 
             # Make sure foreign key constraints aren't goign to trip us up
             #   below, but that they're only checked at the end of the transaction.
-            cursor.execute( "SET CONSTRAINTS fk_diasource_diaobjectid DEFERRED" )
-            cursor.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobjectid DEFERRED" )
+            cursor.execute( "SET CONSTRAINTS fk_diasource_diaobject DEFERRED" )
+            cursor.execute( "SET CONSTRAINTS fk_diaforcedsource_diaobject DEFERRED" )
 
             nobj, _nroot = self.import_objects_from_collection( collection, t0, t1, conn=pqconn, commit=False )
             nsrc = self.import_sources_from_collection( collection, t0, t1, conn=pqconn, commit=False )
