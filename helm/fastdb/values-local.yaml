@@ -63,6 +63,10 @@ mongodb:
 # Web application with NodePort
 webap:
   enabled: true
+  # Authentication: "both" enables CAS and RKAuth for local testing
+  auth:
+    method: "both"
+    casServerUrl: "https://identity.slac.stanford.edu/cas/"
   externalAccess:
     enabled: true
     type: NodePort

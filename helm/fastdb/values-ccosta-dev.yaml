@@ -80,6 +80,11 @@ mongodb:
 webap:
   enabled: true
   basePath: /fastdb-ccosta-dev
+  # Authentication: "both" enables CAS and RKAuth
+  auth:
+    method: "both"
+    casServerUrl: "https://identity.slac.stanford.edu/cas/"
+    casServiceUrl: "https://desc-fastdb.slac.stanford.edu/fastdb-ccosta-dev/auth/cas/callback"
   externalAccess:
     enabled: false
   ingress:

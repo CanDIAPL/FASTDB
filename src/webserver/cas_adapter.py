@@ -172,7 +172,8 @@ class CASAdapter:
         """Initialize CAS adapter.
 
         Args:
-            cas_server_url: Base URL of the CAS server (e.g., https://cas.slac.stanford.edu).
+            cas_server_url: Base URL of the CAS server including /cas/ path
+                (e.g., https://identity.slac.stanford.edu/cas/).
             service_url: The service URL to register with CAS (callback URL).
             timeout: Timeout in seconds for HTTP requests.
         """
@@ -193,7 +194,7 @@ class CASAdapter:
         """
         service = return_url or self.service_url
         params = urlencode({"service": service})
-        return f"{self.cas_server_url}/cas/login?{params}"
+        return f"{self.cas_server_url}/login?{params}"
 
     def get_logout_url(self, return_url: str | None = None) -> str:
         """Get the CAS logout URL.
@@ -204,7 +205,7 @@ class CASAdapter:
         Returns:
             The full CAS logout URL.
         """
-        base = f"{self.cas_server_url}/cas/logout"
+        base = f"{self.cas_server_url}/logout"
         if return_url:
             params = urlencode({"service": return_url})
             return f"{base}?{params}"
@@ -224,7 +225,7 @@ class CASAdapter:
 
         Principle #9: Fail Predictably - All error paths return explicit results.
         """
-        validate_url = f"{self.cas_server_url}/cas/p3/serviceValidate"
+        validate_url = f"{self.cas_server_url}/p3/serviceValidate"
         params = {
             "ticket": ticket,
             "service": self.service_url,

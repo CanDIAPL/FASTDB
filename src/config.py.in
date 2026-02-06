@@ -32,7 +32,7 @@ auth_method = os.getenv("FASTDB_AUTH_METHOD", "cas")
 
 # CAS Configuration
 # Server URL for SLAC CAS
-cas_server_url = os.getenv("FASTDB_CAS_SERVER_URL", "https://cas.slac.stanford.edu")
+cas_server_url = os.getenv("FASTDB_CAS_SERVER_URL", "https://identity.slac.stanford.edu/cas/")
 
 # Service URL for CAS callback (auto-detected from request if not set)
 cas_service_url = os.getenv("FASTDB_CAS_SERVICE_URL")

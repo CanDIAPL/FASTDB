@@ -38,7 +38,7 @@ def app():
 
     # Configure CAS
     CASConfig.setparams(
-        cas_server_url="https://cas.test.example.com",
+        cas_server_url="https://cas.test.example.com/cas",
         cas_service_url="https://myapp.test.example.com/auth/cas/callback",
         auto_create_users=True,
         attribute_map={"email": "mail", "displayname": "cn"},

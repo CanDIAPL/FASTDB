@@ -158,6 +158,13 @@ webap:
   # Base path for subdirectory deployments (sets SCRIPT_NAME env var)
   basePath: ""
 
+  # Authentication configuration
+  auth:
+    # Method: "cas", "rkauth", or "both"
+    method: "cas"
+    casServerUrl: "https://identity.slac.stanford.edu/cas/"
+    casServiceUrl: ""  # Auto-detected from request if empty
+
   # Ingress configuration
   ingress:
     enabled: false

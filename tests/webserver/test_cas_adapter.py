@@ -113,7 +113,7 @@ class TestCASAdapterURLs:
     def test_login_url_construction(self):
         """Login URL includes service parameter."""
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         url = adapter.get_login_url()
@@ -123,7 +123,7 @@ class TestCASAdapterURLs:
     def test_login_url_with_return_url(self):
         """Login URL can use custom return URL."""
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         url = adapter.get_login_url(return_url="https://other.example.com/page")
@@ -132,7 +132,7 @@ class TestCASAdapterURLs:
     def test_logout_url_basic(self):
         """Logout URL without return URL."""
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         url = adapter.get_logout_url()
@@ -141,7 +141,7 @@ class TestCASAdapterURLs:
     def test_logout_url_with_return(self):
         """Logout URL with return URL."""
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         url = adapter.get_logout_url(return_url="https://myapp.example.com/")
@@ -151,7 +151,7 @@ class TestCASAdapterURLs:
     def test_trailing_slash_normalized(self):
         """Trailing slash on CAS URL is normalized."""
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com/",
+            cas_server_url="https://cas.example.com/cas/",
             service_url="https://myapp.example.com/callback",
         )
         url = adapter.get_login_url()
@@ -180,7 +180,7 @@ class TestCASXMLParsing:
         </cas:serviceResponse>
         """
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         result = adapter._parse_cas_response(xml)
@@ -201,7 +201,7 @@ class TestCASXMLParsing:
         </cas:serviceResponse>
         """
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         result = adapter._parse_cas_response(xml)
@@ -222,7 +222,7 @@ class TestCASXMLParsing:
         </cas:serviceResponse>
         """
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         result = adapter._parse_cas_response(xml)
@@ -233,7 +233,7 @@ class TestCASXMLParsing:
     def test_invalid_xml_response(self):
         """Handle malformed XML gracefully."""
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         result = adapter._parse_cas_response("not valid xml <><>")
@@ -251,7 +251,7 @@ class TestCASXMLParsing:
         </cas:serviceResponse>
         """
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         result = adapter._parse_cas_response(xml)
@@ -270,7 +270,7 @@ class TestCASXMLParsing:
         </cas:serviceResponse>
         """
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         result = adapter._parse_cas_response(xml)
@@ -304,7 +304,7 @@ class TestCASValidateTicket:
         mock_get.return_value = mock_response
 
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         result = adapter.validate_ticket("ST-123-abc")
@@ -323,7 +323,7 @@ class TestCASValidateTicket:
         mock_get.side_effect = requests.Timeout("Connection timed out")
 
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         result = adapter.validate_ticket("ST-123-abc")
@@ -339,7 +339,7 @@ class TestCASValidateTicket:
         mock_get.side_effect = requests.ConnectionError("Failed to connect")
 
         adapter = CASAdapter(
-            cas_server_url="https://cas.example.com",
+            cas_server_url="https://cas.example.com/cas",
             service_url="https://myapp.example.com/callback",
         )
         result = adapter.validate_ticket("ST-123-abc")

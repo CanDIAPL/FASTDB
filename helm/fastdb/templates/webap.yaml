@@ -27,10 +27,22 @@ spec:
         envFrom:
         - configMapRef:
             name: mongodb-config
-        {{- if .Values.webap.basePath }}
         env:
+        {{- if .Values.webap.basePath }}
         - name: SCRIPT_NAME
           value: {{ .Values.webap.basePath | quote }}
+        {{- end }}
+        {{- if .Values.webap.auth }}
+        - name: FASTDB_AUTH_METHOD
+          value: {{ .Values.webap.auth.method | default "cas" | quote }}
+        {{- if .Values.webap.auth.casServerUrl }}
+        - name: FASTDB_CAS_SERVER_URL
+          value: {{ .Values.webap.auth.casServerUrl | quote }}
+        {{- end }}
+        {{- if .Values.webap.auth.casServiceUrl }}
+        - name: FASTDB_CAS_SERVICE_URL
+          value: {{ .Values.webap.auth.casServiceUrl | quote }}
+        {{- end }}
         {{- end }}
         ports:
         - containerPort: 8080

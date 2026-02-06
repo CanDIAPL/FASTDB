@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -363,8 +364,9 @@ def cas_login():
     if next_url:
         flask.session["cas_next_url"] = next_url
     else:
-        # Default to referring page or root
-        flask.session["cas_next_url"] = flask.request.referrer or "/"
+        # Default to referring page or app root (respecting SCRIPT_NAME/basePath)
+        app_root = os.environ.get("SCRIPT_NAME", "")
+        flask.session["cas_next_url"] = flask.request.referrer or (app_root + "/")
 
     adapter = _get_cas_adapter()
     login_url = adapter.get_login_url()
@@ -458,8 +460,9 @@ def cas_callback():
         },
     )
 
-    # Redirect to the originally requested URL
-    next_url = flask.session.pop("cas_next_url", "/")
+    # Redirect to the originally requested URL (respecting SCRIPT_NAME/basePath)
+    app_root = os.environ.get("SCRIPT_NAME", "") + "/"
+    next_url = flask.session.pop("cas_next_url", app_root)
     return flask.redirect(next_url)
 
 
