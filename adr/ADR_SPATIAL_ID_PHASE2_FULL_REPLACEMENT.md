@@ -353,6 +353,6 @@ Match objects at insert time using coarse HEALPix cells + neighbor checking.
 ## References
 
 - [ADR_SPATIAL_UUID.md](./ADR_SPATIAL_UUID.md) - Original spatial_id design
-- [SPATIAL_SPECTRA.md](./SPATIAL_SPECTRA.md) - Spectrum query integration
+- [EXAMPLE_PHASE2_SPATIAL_SPECTRA.md](./SPATIAL_SPECTRA.md) - Spectrum query integration
 - [spatial_id.py](./src/spatial_id.py) - Implementation
 - [benchmark_spatial_vs_cone.py](./scripts/benchmark_spatial_vs_cone.py) - Performance benchmarks
