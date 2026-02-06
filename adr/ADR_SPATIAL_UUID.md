@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-01-12
+**Author:** Carlo Costantini
 **Updated:** 2026-01-29
 
 ## Context

@@ -2,7 +2,7 @@
 
 **Status:** Proposed (not yet implemented)
 **Date:** 2026-01-12
-**Author:** Carlo Costan
+**Author:** Carlo Costantini
 **Supersedes:** N/A
 **Depends on:** [ADR_SPATIAL_ID_PHASE1_ADDITIVE.md](./ADR_SPATIAL_ID_PHASE1_ADDITIVE.md) (implemented)
 

@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-01-20
+**Author:** Carlo Costantini
 **Decision:** Implement matching_group functions in native PL/pgSQL rather than PL/Python wrappers
 
 ## Context
