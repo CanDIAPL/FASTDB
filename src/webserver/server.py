@@ -4,10 +4,12 @@ from psycopg import sql
 import flask
 import flask_session
 
+import config
 import db
 import ltcv
 from util import FDBLogger
 import webserver.rkauth_flask as rkauth_flask
+import webserver.cas_flask as cas_flask
 import webserver.dbapp as dbapp
 import webserver.ltcvapp as ltcvapp
 import webserver.spectrumapp as spectrumapp
@@ -16,7 +18,6 @@ from webserver.baseview import BaseView
 # ======================================================================
 # Global config
 
-import config
 with open( config.secretkeyfile ) as ifp:
     _flask_session_secret_key = ifp.readline().strip()
 
@@ -248,22 +249,48 @@ app.config.from_mapping(
 
 server_session = flask_session.Session( app )
 
-rkauth_flask.RKAuthConfig.setdbparams(
-    db_host=db.dbhost,
-    db_port=db.dbport,
-    db_name=db.dbname,
-    db_user=db.dbuser,
-    db_password=db.dbpasswd,
-    email_from = config.emailfrom,
-    email_subject = 'fastdb password reset',
-    email_system_name = 'fastdb',
-    smtp_server = config.smtpserver,
-    smtp_port = config.smtpport,
-    smtp_use_ssl = config.smtpusessl,
-    smtp_username = config.smtpusername,
-    smtp_password = config.smtppassword
-)
-app.register_blueprint( rkauth_flask.bp )
+# =============================================================================
+# Authentication Blueprint Registration
+# =============================================================================
+# Register authentication blueprints based on config.auth_method:
+# - "cas": CAS only (default, SLAC CAS at /auth/cas/*)
+# - "rkauth": RKAuth only (challenge-response at /auth/*)
+# - "both": Both methods enabled (CAS at /auth/cas/*, RKAuth at /auth/*)
+
+if config.auth_method in ("rkauth", "both"):
+    rkauth_flask.RKAuthConfig.setdbparams(
+        db_host=db.dbhost,
+        db_port=db.dbport,
+        db_name=db.dbname,
+        db_user=db.dbuser,
+        db_password=db.dbpasswd,
+        email_from=config.emailfrom,
+        email_subject='fastdb password reset',
+        email_system_name='fastdb',
+        smtp_server=config.smtpserver,
+        smtp_port=config.smtpport,
+        smtp_use_ssl=config.smtpusessl,
+        smtp_username=config.smtpusername,
+        smtp_password=config.smtppassword
+    )
+    app.register_blueprint(rkauth_flask.bp)
+    FDBLogger.info(f"Registered RKAuth blueprint (auth_method={config.auth_method})")
+
+if config.auth_method in ("cas", "both"):
+    cas_flask.CASConfig.setparams(
+        cas_server_url=config.cas_server_url,
+        cas_service_url=config.cas_service_url,
+        auto_create_users=config.cas_auto_create_users,
+        attribute_map=config.cas_attribute_map,
+        default_email_domain=config.cas_default_email_domain,
+        db_host=db.dbhost,
+        db_port=db.dbport,
+        db_name=db.dbname,
+        db_user=db.dbuser,
+        db_password=db.dbpasswd,
+    )
+    app.register_blueprint(cas_flask.bp)
+    FDBLogger.info(f"Registered CAS blueprint (auth_method={config.auth_method})")
 
 app.register_blueprint( dbapp.bp )
 app.register_blueprint( ltcvapp.bp )

@@ -1,13 +1,55 @@
+import json
+import os
+
+# Session configuration
 sessionstore = "/sessions"
+
+# Database configuration
 dbuser = "@dbuser@"
 dbpasswdfile = "@dbpasswdfile@"
 dbhost = "@dbhost@"
 dbport = "@dbport@"
 dbdatabase = "@dbdatabase@"
 secretkeyfile = "@secretkeyfile@"
+
+# Email configuration (for RKAuth password reset)
 emailfrom = "@emailfrom@"
 smtpserver = "@smtpserver@"
 smtpport = @smtpport@
 smtpusessl = @smtpusessl@
 smtpusername = @smtpusername@
 smtppassword = @smtppassword@
+
+# =============================================================================
+# Authentication Configuration
+# =============================================================================
+
+# Authentication method: "cas", "rkauth", or "both"
+# - "cas": Use SLAC CAS as the primary authentication method
+# - "rkauth": Use RKAuth challenge-response authentication
+# - "both": Enable both methods (CAS at /auth/cas/*, RKAuth at /auth/*)
+auth_method = os.getenv("FASTDB_AUTH_METHOD", "cas")
+
+# CAS Configuration
+# Server URL for SLAC CAS
+cas_server_url = os.getenv("FASTDB_CAS_SERVER_URL", "https://cas.slac.stanford.edu")
+
+# Service URL for CAS callback (auto-detected from request if not set)
+cas_service_url = os.getenv("FASTDB_CAS_SERVICE_URL")
+
+# Whether to automatically create users on first CAS login
+cas_auto_create_users = os.getenv("FASTDB_CAS_AUTO_CREATE_USERS", "true").lower() == "true"
+
+# Default email domain for users without email in CAS attributes
+cas_default_email_domain = os.getenv("FASTDB_CAS_DEFAULT_EMAIL_DOMAIN", "slac.stanford.edu")
+
+# Mapping from our field names to CAS attribute names
+# Format: JSON object, e.g., '{"email": "mail", "displayname": "cn"}'
+_cas_attribute_map_str = os.getenv(
+    "FASTDB_CAS_ATTRIBUTE_MAP",
+    '{"email": "mail", "displayname": "cn"}'
+)
+try:
+    cas_attribute_map = json.loads(_cas_attribute_map_str)
+except json.JSONDecodeError:
+    cas_attribute_map = {"email": "mail", "displayname": "cn"}
