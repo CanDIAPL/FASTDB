@@ -8,7 +8,7 @@ global:
   # Images built by docker-compose and loaded into Kind via kind load.
   # imagePullPolicy: Never means K8s uses the local store only — no registry contact.
   imageRegistry: "ghcr.io/lsstdesc"
-  imageTag: "test20251201"
+  imageTag: "test20260428"
   imagePullPolicy: Never
   imagePullSecrets: []
 

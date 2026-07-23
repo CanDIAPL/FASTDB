@@ -27,7 +27,7 @@
 #                            Bakes the path into frontend JS/HTML during the build step.
 #   --load-images            Build container images and load them into the Kind cluster.
 #                            Implied by --create-cluster. Uses DOCKER_ARCHIVE and DOCKER_VERSION
-#                            env vars (defaults: ghcr.io/lsstdesc, test20251201).
+#                            env vars (defaults: ghcr.io/lsstdesc, test20260428).
 #   -h, --help               Show this help message
 #
 
@@ -97,13 +97,16 @@ for cmd in kubectl helm; do
   fi
 done
 
-# Detect container runtime: prefer podman, fall back to docker
-if command -v podman &>/dev/null; then
+# Detect a usable container runtime: prefer Podman, fall back to Docker.
+# Having a CLI in PATH is not sufficient on macOS, where Podman needs its
+# virtual machine running and Docker needs its daemon/Desktop running.
+if command -v podman &>/dev/null && podman info &>/dev/null; then
   CONTAINER_RT=podman
-elif command -v docker &>/dev/null; then
+elif command -v docker &>/dev/null && docker info &>/dev/null; then
   CONTAINER_RT=docker
 else
-  echo "Error: podman or docker is required but neither was found in PATH" >&2
+  echo "Error: neither Podman nor Docker is usable." >&2
+  echo "Start a Podman machine ('podman machine start') or Docker Desktop, then retry." >&2
   exit 1
 fi
 
@@ -163,7 +166,7 @@ fi
 # ── Step 1b: Build and load images into Kind ──────────────────────────
 if [[ "$LOAD_IMAGES" == "true" ]]; then
   DOCKER_ARCHIVE="${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}"
-  DOCKER_VERSION="${DOCKER_VERSION:-test20251201}"
+  DOCKER_VERSION="${DOCKER_VERSION:-test20260428}"
 
   echo "--- Building container images ---"
   $CONTAINER_RT compose build postgres mongodb shell webap queryrunner
@@ -210,7 +213,7 @@ echo ""
 
 # ── Step 4: Copy code to PVC ────────────────────────────────────────
 echo "--- Copying install/ contents to /fastdb/ on PVC ---"
-COPYFILE_DISABLE=1 tar cf - -C install . \
+COPYFILE_DISABLE=1 tar --exclude='webserver/gunicorn.ctl' -cf - -C install . \
   | kubectl "${KUBECTL_CTX[@]+"${KUBECTL_CTX[@]}"}" exec -i -n "$NS" "$SHELL_POD" \
     -- tar xf - -C /fastdb/ 2>/dev/null
 echo "  install/ copied."

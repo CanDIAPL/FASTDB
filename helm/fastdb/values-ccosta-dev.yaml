@@ -7,7 +7,7 @@ global:
 
   # GitHub Container Registry
   imageRegistry: "ghcr.io/fifteen3"
-  imageTag: "test20251201"
+  imageTag: "test20260428"
   imagePullPolicy: Always
   imagePullSecrets:
     - name: ghcr-secret

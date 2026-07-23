@@ -51,6 +51,9 @@ helm/fastdb/
 - Kubernetes cluster (Kind, SLAC S3DF, NERSC SPIN, etc.)
 - `helm` CLI installed
 - `kubectl` configured to access your cluster
+- A usable container runtime: Podman is preferred by `helm-deploy.sh`; Docker
+  is used automatically when Podman's machine is not running. On macOS, start
+  one with `podman machine start` or start Docker Desktop before deploying.
 - Docker images built and accessible
 - For private registries (GHCR, NERSC, etc.): a GitHub PAT with `read:packages` scope (see [Registry Credentials](#registry-credentials))
 
@@ -59,26 +62,21 @@ helm/fastdb/
 The deploy script can create a Kind cluster for you via `--create-cluster`. The Kind config template (`admin/local/kind-config.yaml`) uses `${PWD}` in `hostPath` entries, which the script replaces with the current directory at runtime. The cluster is named after the namespace, and `--context` is set to `kind-<namespace>` automatically.
 
 ```bash
-# 1. Build images and load into Kind
-docker-compose build postgres mongodb shell webap queryrunner
-kind load docker-image \
-  ghcr.io/lsstdesc/fastdb-postgres:test20251201 \
-  ghcr.io/lsstdesc/fastdb-mongodb:test20251201 \
-  ghcr.io/lsstdesc/fastdb-shell:test20251201 \
-  ghcr.io/lsstdesc/fastdb-webap:test20251201 \
-  ghcr.io/lsstdesc/fastdb-query-runner:test20251201 \
-  --name fastdb-local
-
-# 2. Create cluster + deploy (first time)
+# Create the Kind cluster, build the install artifact and images, load the
+# images into Kind, and deploy. This can take several minutes on first run.
 ./scripts/helm-deploy.sh fastdb-local ./helm/fastdb/values-local.yaml \
   --create-cluster admin/local/kind-config.yaml
 
-# 3. Verify
+# Verify
 kubectl --context kind-fastdb-local get pods -n fastdb-local
 curl http://localhost:8080
 ```
 
 On subsequent deploys, `--create-cluster` will skip creation if the cluster already exists. Or omit it and use `--context kind-fastdb-local` directly.
+
+If you run the image-loading commands manually, create the Kind cluster
+*before* invoking `kind load docker-image`; there is no node to receive images
+until then.
 
 To tear down the cluster:
 
@@ -125,8 +123,8 @@ helm upgrade --install fastdb ./helm/fastdb \
 The `install/` directory is a build artifact produced by Automake. It contains the Python code, config files, and static assets that get mounted into pods at `/fastdb`. This directory is **not** in git — it must be built before deploying.
 
 ```bash
-# Build install/ using docker-compose (runs ./configure && make install inside a container)
-docker-compose run --rm makeinstall
+# Build install/ using Compose (runs ./configure && make install inside a container)
+docker compose run --rm makeinstall
 ```
 
 This creates/updates the `install/` directory at the repo root. The `db/` directory (SQL migrations) is already in git and doesn't need building.
