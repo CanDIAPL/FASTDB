@@ -7,7 +7,8 @@
 # mount /fastdb-install and /fastdb-db via hostPath (values-local.yaml:
 # volumes.codeHostPath: true).
 #
-# extraPortMappings map the webap NodePort (30080) to localhost:8080.
+# extraPortMappings map the webap NodePort (30080) to localhost:8080 and the
+# MailHog HTTP NodePort (30025) to localhost:8025.
 
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
@@ -21,4 +22,7 @@ nodes:
     extraPortMappings:
       - containerPort: 30080
         hostPort: 8080
+        protocol: TCP
+      - containerPort: 30025
+        hostPort: 8025
         protocol: TCP
