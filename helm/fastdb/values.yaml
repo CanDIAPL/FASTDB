@@ -218,6 +218,46 @@ createdb:
     tag: ""
   ttlSecondsAfterFinished: 300
 
+# Optional alert ingestion pipeline.  It is disabled by default because broker
+# addresses, topics, schemas, and processing-version policy are deployment
+# specific.  values-local.yaml enables it for a local LASS Kafka broker.
+ingestion:
+  enabled: false
+  image:
+    repository: fastdb-shell
+    tag: ""
+
+  brokerConsumer:
+    replicas: 1
+    name: broker
+    loggerName: BROKER
+    server: ""
+    groupId: fastdb
+    topic: ""
+    schemaFile: /fastdb/share/avsc/lsst.v10_0.alert.avsc
+    collectionBase: alerts
+    brokerName: kafka
+    # Optional IPv4 address for host.docker.internal.  Set this only when a
+    # local Docker-host Kafka listener must be reached from Kind.
+    dockerHostIp: ""
+    # When Kafka advertises localhost to clients, a local proxy lets the
+    # consumer follow that advertised address from inside its pod.
+    localhostProxy: false
+    poll:
+      restartTimeMinutes: 30
+      noTopicSleepSeconds: 10
+
+  processingVersion:
+    name: realtime
+
+  sourceImporter:
+    # A CronJob is used because SourceImporter persists its last successful
+    # import time in PostgreSQL, so each run imports only newly received data.
+    schedule: "0 * * * *"
+    startingDeadlineSeconds: 30
+    successfulJobsHistoryLimit: 1
+    failedJobsHistoryLimit: 3
+
 # WAL webserver (for replication - SLAC specific)
 walWebserver:
   enabled: false

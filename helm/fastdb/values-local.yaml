@@ -95,3 +95,27 @@ mailhog:
 # Database migrations
 createdb:
   enabled: true
+
+# Consume Avro alerts produced by the local LASS Kafka container.  Kind reaches
+# a Docker-published host port through host.docker.internal.
+ingestion:
+  enabled: true
+  brokerConsumer:
+    name: lass
+    loggerName: LASS
+    server: host.docker.internal:19092
+    groupId: fastdb-local-lass
+    topic: lass-topic
+    schemaFile: /fastdb/share/avsc/lsst.v10_0.alert.avsc
+    collectionBase: lass
+    brokerName: lass
+    # Docker Desktop's IPv4 gateway.  Pinning it avoids a non-routable IPv6
+    # host.docker.internal record inside the Kind node.
+    dockerHostIp: 192.168.65.254
+    # LASS advertises localhost:19092.  This pod-local proxy forwards that
+    # Kafka connection back to LASS on the Docker host.
+    localhostProxy: true
+  processingVersion:
+    name: lass
+  sourceImporter:
+    schedule: "* * * * *"
