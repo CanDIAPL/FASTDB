@@ -11,20 +11,22 @@ Helm is a package manager for Kubernetes. It uses **charts** (packages of pre-co
 ### How FASTDB Helm Chart Works
 
 ```
-helm/fastdb/
-├── Chart.yaml              # Chart metadata (name, version)
-├── values.yaml             # Default configuration values
-├── values-local.yaml       # Local Kind cluster overrides
-├── values-slac.yaml        # SLAC S3DF overrides
-└── templates/              # Kubernetes manifest templates
-    ├── _helpers.tpl        # Reusable template functions
-    ├── namespace.yaml
-    ├── secrets.yaml
-    ├── pvcs.yaml
-    ├── postgres.yaml
-    ├── mongodb.yaml
-    ├── webap.yaml
-    └── ...
+helm/
+├── scripts/                 # Local-development helper scripts
+└── fastdb/
+    ├── Chart.yaml           # Chart metadata (name, version)
+    ├── values.yaml          # Default configuration values
+    ├── values-local.yaml    # Local Kind cluster overrides
+    ├── values-slac.yaml     # SLAC S3DF overrides
+    └── templates/           # Kubernetes manifest templates
+        ├── _helpers.tpl     # Reusable template functions
+        ├── secrets.yaml
+        ├── pvcs.yaml
+        ├── postgres.yaml
+        ├── mongodb.yaml
+        ├── webap.yaml
+        ├── single-broker-ingestion.yaml
+        └── ...
 ```
 
 **Key Concepts:**
@@ -57,7 +59,59 @@ helm/fastdb/
 - Docker images built and accessible
 - For private registries (GHCR, NERSC, etc.): a GitHub PAT with `read:packages` scope (see [Registry Credentials](#registry-credentials))
 
-### Deploy to Local Kind Cluster
+The `helm/scripts/start-local.sh` helper uses Docker Compose and Docker image
+loading for Kind.  The general `scripts/helm-deploy.sh` supports Podman where
+the target environment and Kind setup support it.
+
+### Recommended Local Kind Workflow
+
+For a laptop development environment, use the provided helpers from the
+repository root:
+
+```bash
+./helm/scripts/start-local.sh
+```
+
+The script creates the `fastdb-local` Kind cluster if needed, builds FASTDB
+with `http://localhost:8080/` as its external URL, builds and loads the local
+images into Kind, then deploys the local Helm values.  It is safe to re-run
+after changing FASTDB Python code, Helm templates, or local values.
+
+After it finishes, check the deployment and open:
+
+```bash
+kubectl --context kind-fastdb-local get pods -n fastdb-local
+
+# FASTDB web application
+open http://localhost:8080
+
+# MailHog inbox (password-reset emails)
+open http://localhost:8025
+```
+
+To delete the local cluster and all of its local FASTDB data:
+
+```bash
+./helm/scripts/stop-local.sh
+```
+
+This is deliberately a reset, not a pause: the next `start-local.sh` creates a
+fresh cluster and database.
+
+To create the fixed local test account (`test_user`) and open its password-reset
+page and MailHog message, run:
+
+```bash
+./helm/scripts/create-user-local.sh
+```
+
+Enter the desired password manually on the opened reset page.
+
+`values-local.yaml` is specifically for the local/laptop setup.  In particular, it
+contains host-network settings for a local Kafka broker (using the [LASS](https://github.com/CanDIAPL/lass) tool) and an ingestion configuration for the `lass-topic`; do not use it as the starting point for a
+remote deployment.  Create a separate values file for each remote environment.
+
+### Manual Local Kind Deployment
 
 The deploy script can create a Kind cluster for you via `--create-cluster`. The Kind config template (`admin/local/kind-config.yaml`) uses `${PWD}` in `hostPath` entries, which the script replaces with the current directory at runtime. The cluster is named after the namespace, and `--context` is set to `kind-<namespace>` automatically.
 
@@ -65,7 +119,8 @@ The deploy script can create a Kind cluster for you via `--create-cluster`. The 
 # Create the Kind cluster, build the install artifact and images, load the
 # images into Kind, and deploy. This can take several minutes on first run.
 ./scripts/helm-deploy.sh fastdb-local ./helm/fastdb/values-local.yaml \
-  --create-cluster admin/local/kind-config.yaml
+  --create-cluster admin/local/kind-config.yaml \
+  --external-url http://localhost:8080/
 
 # Verify
 kubectl --context kind-fastdb-local get pods -n fastdb-local
@@ -129,7 +184,7 @@ docker compose run --rm makeinstall
 
 This creates/updates the `install/` directory at the repo root. The `db/` directory (SQL migrations) is already in git and doesn't need building.
 
-#### Subdirectory Deployments (external URL)
+#### External URL and Subdirectory Deployments
 
 When FASTDB is served from a subdirectory (e.g., `https://host/fastdb-ccosta-dev/` instead of `https://host/`), the frontend JavaScript and HTML templates must be built with the correct base path. The Automake build system uses `@external_url@` placeholders in `.js.in` and `.html.in` files that get substituted during `./configure`:
 
@@ -152,16 +207,19 @@ The deploy script handles this via `--external-url`:
   --external-url /fastdb-ccosta-dev/ --registry-password ghp_xxxxx
 ```
 
-The `--external-url` value must:
-- Match the `webap.basePath` in your values file (plus a trailing `/`)
-- End with a trailing slash
-- Be an absolute path starting with `/`
+The `--external-url` value must end in a trailing slash.  It can be either a
+path (such as `/fastdb-ccosta-dev/`) or a complete public URL (such as
+`https://fastdb.example.org/fastdb-ccosta-dev/`).  Use the complete URL when
+FASTDB needs to send an absolute link in email, including password-reset links.
+For the local Kind helper, this is `http://localhost:8080/`.
 
 Two settings work together:
-- `--external-url /path/` → bakes the path into static JS/HTML at build time
+- `--external-url /path/` or `https://host/path/` → bakes the URL/path into
+  static JS/HTML at build time and into links generated by the server
 - `webap.basePath: /path` → sets `SCRIPT_NAME` env var for Flask routing at runtime
 
-If your deployment is at the root URL (`/`), you don't need `--external-url` or `basePath`.
+For a root-path deployment, omit `webap.basePath`.  Pass the public root URL to
+`--external-url` when generated emails must point to that public address.
 
 ### Deploy Script
 
@@ -185,7 +243,7 @@ If your deployment is at the root URL (`/`), you don't need `--external-url` or 
 | `--create-cluster FILE` | Create a Kind cluster before deploying. `${PWD}` in the config is replaced with the current directory. Cluster name is set to `NAMESPACE`, context to `kind-NAMESPACE`. Skips creation if the cluster already exists. |
 | `--context NAME` | Kubernetes context to use (default: current kubeconfig context). Set automatically by `--create-cluster`. |
 | `--registry-password PAT` | Registry password/token (passed to Helm as `registryCredentials.password`) |
-| `--external-url PATH` | Base path for subdirectory deployments (e.g., `/fastdb-ccosta-dev/`). Must match `webap.basePath` with a trailing `/`. See [Subdirectory Deployments](#subdirectory-deployments-external-url). |
+| `--external-url URL_OR_PATH` | Public URL or base path baked into generated frontend assets and links. It must end in `/`; its path component must match `webap.basePath` when one is configured. See [External URL and Subdirectory Deployments](#external-url-and-subdirectory-deployments). |
 | `--skip-build` | Skip the `docker-compose makeinstall` step |
 | `--skip-helm` | Skip `helm upgrade --install` (just copy code + restart) |
 | `--release NAME` | Helm release name (default: `fastdb`) |
