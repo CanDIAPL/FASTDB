@@ -90,7 +90,7 @@ services:
         source: .
         target: /code
     working_dir: /code/db
-    entrypoint: [ "python", "apply_migrations.py" ]
+    entrypoint: ["python", "apply_migrations.py"]
 
   mailhog:
     image: mailhog/mailhog:latest
@@ -171,10 +171,10 @@ services:
         target: /logs
     post_start:
       - command: /bin/bash -c "
-                   chown -R ${USERID:-0}:${GROUPID:-0} /sessions
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /logs
-                   "
+          chown -R ${USERID:-0}:${GROUPID:-0} /sessions
+          && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
+          && chown -R ${USERID:-0}:${GROUPID:-0} /logs
+          "
         privileged: true
         user: root
 
@@ -222,10 +222,10 @@ services:
         target: /logs
     post_start:
       - command: /bin/bash -c "
-                   chown -R ${USERID:-0}:${GROUPID:-0} /sessions
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /logs
-                   "
+          chown -R ${USERID:-0}:${GROUPID:-0} /sessions
+          && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
+          && chown -R ${USERID:-0}:${GROUPID:-0} /logs
+          "
         privileged: true
         user: root
     working_dir: /code
@@ -270,10 +270,10 @@ services:
         target: /logs
     post_start:
       - command: /bin/bash -c "
-                   chown -R ${USERID:-0}:${GROUPID:-0} /sessions
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /logs
-                   "
+          chown -R ${USERID:-0}:${GROUPID:-0} /sessions
+          && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
+          && chown -R ${USERID:-0}:${GROUPID:-0} /logs
+          "
         privileged: true
         user: root
     working_dir: /code
@@ -290,15 +290,15 @@ services:
         target: /fastdb
     working_dir: /code
     entrypoint: /bin/bash -c "
-                  touch aclocal.m4 configure
-                  && find . -name Makefile.am -exec touch \\{\\} \\;
-                  && find . -name Makefile.in -exec touch \\{\\} \\;
-                  && ./configure \
-                       --with-installdir=/fastdb \
-                       --with-smtp-server=mailhog \
-                       --with-smtp-port=1025 \
-                  && make install
-                  "
+      touch aclocal.m4 configure
+      && find . -name Makefile.am -exec touch \\{\\} \\;
+      && find . -name Makefile.in -exec touch \\{\\} \\;
+      && ./configure \
+      --with-installdir=/fastdb \
+      --with-smtp-server=mailhog \
+      --with-smtp-port=1025 \
+      && make install
+      "
 
   runtests:
     depends_on:
@@ -311,7 +311,7 @@ services:
       createdb:
         condition: service_completed_successfully
       webap:
-        condition: service_started   # TODO : health test for webap
+        condition: service_started # TODO : health test for webap
       makeinstall:
         condition: service_completed_successfully
     image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260428}
@@ -342,15 +342,15 @@ services:
         target: /logs
     post_start:
       - command: /bin/bash -c "
-                   chown -R ${USERID:-0}:${GROUPID:-0} /sessions
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
-                   && chown -R ${USERID:-0}:${GROUPID:-0} /logs
-                   "
+          chown -R ${USERID:-0}:${GROUPID:-0} /sessions
+          && chown -R ${USERID:-0}:${GROUPID:-0} /query_results
+          && chown -R ${USERID:-0}:${GROUPID:-0} /logs
+          "
         privileged: true
         user: root
     working_dir: /code/tests
     entrypoint: pytest -v
-    
+
 volumes:
   postgres_data:
   mongodb_data:

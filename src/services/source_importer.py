@@ -11,16 +11,19 @@
 #
 # See function util.datetime_to_utc
 
-import io
-import sys
-import datetime
 import argparse
-import simplejson
-import textwrap
+import datetime
+import io
 import logging
+import sys
+import textwrap
+import time
 import traceback
+import uuid
 
 import psycopg.sql as sql
+import simplejson
+
 import db
 import util
 from util import FDBLogger
@@ -34,24 +37,77 @@ class SourceImporter:
     MongoDB collection (see db.py::get_mongo_collection) to import from.
     """
 
-    diaobject_fields = [ 'diaobjectid', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
+    diaobject_fields = ["diaobjectid", "ra", "dec", "raerr", "decerr", "ra_dec_cov"]
 
-    diasource_fields = [ 'diasourceid', 'diaobjectid', 'visit', 'band', 'midpointmjdtai',
-                         'psfflux', 'psffluxerr', 'ra', 'dec', 'raerr', 'decerr', 'ra_dec_cov' ]
+    diasource_fields = [
+        "diasourceid",
+        "diaobjectid",
+        "visit",
+        "band",
+        "midpointmjdtai",
+        "psfflux",
+        "psffluxerr",
+        "ra",
+        "dec",
+        "raerr",
+        "decerr",
+        "ra_dec_cov",
+    ]
 
-    diasource_extra_fields = [ 'diasourceid', 'detector', 'x', 'y', 'xerr', 'yerr', 'x_y_cov',
-                               'psflnl', 'psfchi2', 'psfndata', 'snr',
-                               'scienceflux', 'sciencefluxerr', 'templateflux', 'templatefluxerr',
-                               'extendedness', 'reliability', 'ixx', 'iyy', 'ixy', 'ixxpsf', 'iyypsf', 'ixypsf',
-                               'flags', 'pixelflags', 'apflux', 'apfluxerr', 'bboxsize',
-                               'timeprocessedmjdtai', 'timewithdrawnmjdtai', 'parentdiasourceid' ]
+    diasource_extra_fields = [
+        "diasourceid",
+        "detector",
+        "x",
+        "y",
+        "xerr",
+        "yerr",
+        "x_y_cov",
+        "psflnl",
+        "psfchi2",
+        "psfndata",
+        "snr",
+        "scienceflux",
+        "sciencefluxerr",
+        "templateflux",
+        "templatefluxerr",
+        "extendedness",
+        "reliability",
+        "ixx",
+        "iyy",
+        "ixy",
+        "ixxpsf",
+        "iyypsf",
+        "ixypsf",
+        "flags",
+        "pixelflags",
+        "apflux",
+        "apfluxerr",
+        "bboxsize",
+        "timeprocessedmjdtai",
+        "timewithdrawnmjdtai",
+        "parentdiasourceid",
+    ]
 
-    diaforcedsource_fields = [ 'diaforcedsourceid', 'diaobjectid', 'visit', 'band', 'midpointmjdtai',
-                               'psfflux', 'psffluxerr', 'ra', 'dec' ]
+    diaforcedsource_fields = [
+        "diaforcedsourceid",
+        "diaobjectid",
+        "visit",
+        "band",
+        "midpointmjdtai",
+        "psfflux",
+        "psffluxerr",
+        "ra",
+        "dec",
+    ]
 
-    diaforcedsource_extra_fields = [ 'diaforcedsourceid', 'detector', 'scienceflux', 'sciencefluxerr',
-                                     'timeprocessedmjdtai', 'timewithdrawnmjdtai' ]
-
+    diaforcedsource_extra_fields = [
+        "diaforcedsourceid",
+        "detector",
+        "scienceflux",
+        "sciencefluxerr",
+        "timeprocessedmjdtai",
+        "timewithdrawnmjdtai",
+    ]
 
     @classmethod
     def build_flags( cls, flagmap, row ):
@@ -61,15 +117,17 @@ class SourceImporter:
                 val |= mask
         return mask
 
-
-    def __init__( self, object_base_processing_version=None,
-                  object_position_base_processing_version=None,
-                  source_base_processing_version=None,
-                  forcedsource_base_processing_version=None,
-                  host_base_processing_version=None,
-                  collection_base_name=None,
-                  object_match_radius=1.,
-                  debug_just_read_mongo=False ):
+    def __init__(
+        self,
+        object_base_processing_version=None,
+        object_position_base_processing_version=None,
+        source_base_processing_version=None,
+        forcedsource_base_processing_version=None,
+        host_base_processing_version=None,
+        collection_base_name=None,
+        object_match_radius=1.0,
+        debug_just_read_mongo=False,
+    ):
         """Create a SourceImporter.
 
         Parameters
@@ -109,24 +167,105 @@ class SourceImporter:
 
 
         """
-        if any( i is None for i in [ object_base_processing_version, object_position_base_processing_version,
-                                     source_base_processing_version, forcedsource_base_processing_version ] ):
-            raise ValueError( "base processing versions are required" )
+        if any(
+            i is None
+            for i in [
+                object_base_processing_version,
+                object_position_base_processing_version,
+                source_base_processing_version,
+                forcedsource_base_processing_version,
+            ]
+        ):
+            # raise ValueError( "base processing versions are required" )
+            pvid = uuid.uuid4()
+            with db.DBCon() as dbcon:
+                ids, _ = dbcon.execute("SELECT id, _table FROM base_processing_version WHERE description='default';")
+                bpvids = {}
+                if len(ids) == 0: # there are no base processing versions, insert one into each table
+                    # these queries are adapted from src/admin/fastdb_loader.py
+                    dbcon.execute_nofetch(
+                        """
+                        INSERT INTO processing_version(id,description)
+                        VALUES (%(id)s,%(desc)s)
+                        """,
+                        {
+                            "id": pvid,
+                            "desc": 'default'
+                        },
+                    )
+                    for table in [
+                        "host_galaxy",
+                        "diaobject",
+                        "diaobject_host_match",
+                        "diaobject_position",
+                        "diasource",
+                        "diaforcedsource",
+                    ]:
+                        # rows = dbcon.execute(
+                        #     """
+                        #     SELECT b.id FROM base_processing_version b
+                        #     INNER JOIN base_procver_of_procver j ON j.base_procver_id=b.id
+                        #     WHERE j.procver_id=%(pvid)s AND j._table=%(table)s
+                        #     ORDER BY j.priority DESC
+                        #     LIMIT 1,
+                        #     """,
+                        #     {
+                        #         "pvid": pvid,
+                        #         "table": table
+                        #     },
+                        # )
+                        bpvid = uuid.uuid4()
+                        bpvids[table] = bpvid
+                        dbcon.execute_nofetch(
+                            """
+                            INSERT INTO base_processing_version(id,_table,description)
+                            VALUES (%(id)s,%(table)s,%(desc)s)
+                            """,
+                            {
+                                "id": bpvid,
+                                "table": table,
+                                "desc": 'default'
+                            },
+                        )
+                        dbcon.execute_nofetch(
+                            """
+                            INSERT INTO base_procver_of_procver(base_procver_id,procver_id,_table,priority)
+                            VALUES (%(bpv)s,%(pv)s,%(table)s,0)
+                            """,
+                            {
+                                "bpv": bpvid,
+                                "table": table,
+                                "pv": pvid
+                            },
+                        )
+                    dbcon.commit()
 
-        if ( not isinstance( collection_base_name, str ) ) or ( len( collection_base_name ) == 0 ):
-            raise ValueError( "collection_base_name must be a non-empty string" )
+                # assign default processing versions based on table
+                rows, _ = dbcon.execute("SELECT _table, id FROM base_processing_version WHERE description='default';")
+                ids = {}
+                for r in rows:
+                    ids[r[0]] = r[1]
+                object_base_processing_version          = ids['diaobject']
+                object_position_base_processing_version = ids['diaobject_position']
+                source_base_processing_version          = ids['diasource']
+                forcedsource_base_processing_version    = ids['diaforcedsource']
+
+        if (not isinstance(collection_base_name, str)) or (len(collection_base_name) == 0):
+            raise ValueError("collection_base_name must be a non-empty string")
         self.collection_base_name = collection_base_name
 
-        self.object_base_processing_version = util.base_procver_id( object_base_processing_version, 'diaobject' )
-        self.object_position_base_processing_version = util.base_procver_id( object_position_base_processing_version,
-                                                                             'diaobject_position' )
-        self.source_base_processing_version = util.base_procver_id( source_base_processing_version, 'diasource' )
-        self.forcedsource_base_processing_version = util.base_procver_id( forcedsource_base_processing_version,
-                                                                          'diaforcedsource' )
+        self.object_base_processing_version = util.base_procver_id(object_base_processing_version, "diaobject")
+        self.object_position_base_processing_version = util.base_procver_id(
+            object_position_base_processing_version, "diaobject_position"
+        )
+        self.source_base_processing_version = util.base_procver_id(source_base_processing_version, "diasource")
+        self.forcedsource_base_processing_version = util.base_procver_id(
+            forcedsource_base_processing_version, "diaforcedsource"
+        )
         # self.host_base_processing_version = util.base_procver_id( host_base_processing_version )
-        self.object_match_radius = float( object_match_radius )
+        self.object_match_radius = float(object_match_radius)
 
-        self.debug_just_read_mongo = bool( debug_just_read_mongo )
+        self.debug_just_read_mongo = bool(debug_just_read_mongo)
 
 
     @classmethod
@@ -270,7 +409,7 @@ class SourceImporter:
             FDBLogger.debug( f"      ...read {gratuitous} rows from mongo" )
 
         else:
-            with dbcon.cursor.copy( f"COPY {temptable}({','.join(writefields)}) FROM STDIN" ) as pgcopy:
+            with dbcon.cursor.copy(f"COPY {temptable}({','.join(writefields)}) FROM STDIN") as pgcopy:
                 for row in mongocursor:
                     # This is probably inefficient.  Generator to list to tuple.  python makes
                     #   writing this easy, but it's probably doing multiple gratuitous memory copies
@@ -279,12 +418,11 @@ class SourceImporter:
                              else row[f]
                              for f in fields ]
                     if base_procver_id is not None:
-                        data.append( base_procver_id )
-                    pgcopy.write_row( tuple( data ) )
+                        data.append(base_procver_id)
+                    pgcopy.write_row(tuple(data))
                     n += 1
 
-            FDBLogger.debug( f"      ...wrote {n} rows to {temptable}" )
-
+            FDBLogger.debug(f"      ...wrote {n} rows to {temptable}")
 
     def read_mongo_sources( self, dbcon, t0=None, t1=None, batchsize=10000 ):
         """Read all top-level diaSource records from a mongo collection and stick them in temp tables.
@@ -586,6 +724,7 @@ class SourceImporter:
             if self.debug_just_read_mongo:
                 return 0
 
+            # print(dbcon.execute("SELECT * FROM temp_diasource_brokerinfo_import;"))
             FDBLogger.debug( "   ...inserting new brokerinfos" )
             dbcon.execute( "INSERT INTO diasource_brokerinfo "
                            "( SELECT * FROM temp_diasource_brokerinfo_import ) "
@@ -746,26 +885,51 @@ class SourceImporter:
 # ======================================================================
 
 def main():
-    parser = argparse.ArgumentParser( 'source_importer.py', description='Import sources from mongo to postgres',
-                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter )
-    parser.add_argument( "-c", "--collection", required=True, nargs='+',
-                         help="MongoDB collections to import from" )
-    parser.add_argument( "-o", "--object-base-processing-version", default=None,
-                         help="Base processing version (uuid or text) to tag imported objects with." )
-    parser.add_argument( "-p", "--object-position-base-processing-version", default=None,
-                         help="Base processing version (uuid or text) to tag imported object positions with." )
-    parser.add_argument( "-s", "--source-base-processing-version", required=True,
-                         help="Base processing version (uuid or text) to tag imported sources with." )
-    parser.add_argument( "-f", "--forcedsource-base-processing-version", required=True,
-                         help="Base processing version (uuid or text) to tag imported forced sources with." )
-    parser.add_argument( "-H", "--host-base-processing-version", default=None,
-                         help=( "Base processing verson (uuid or text) to tag imported hosts with.  "
-                                "Not currently used." ) )
-    parser.add_argument( "--t1", default=None, help="Only load alerts received through this time (UTC) (ISO format)" )
-    parser.add_argument( "-d", "--debug-just-read-mongo", default=False, action='store_true',
-                         help="Don't write to postgres (even temporary tables), just read mongo for timing." )
-    parser.add_argument( "-v", "--verbose", action='store_true', default=False,
-                         help="Show debug log messages" )
+    parser = argparse.ArgumentParser(
+        "source_importer.py",
+        description="Import sources from mongo to postgres",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("-c", "--collection", required=True, nargs="+", help="MongoDB collections to import from")
+    parser.add_argument(
+        "-o",
+        "--object-base-processing-version",
+        default=None,
+        help="Base processing version (uuid or text) to tag imported objects with.",
+    )
+    parser.add_argument(
+        "-p",
+        "--object-position-base-processing-version",
+        default=None,
+        help="Base processing version (uuid or text) to tag imported object positions with.",
+    )
+    parser.add_argument(
+        "-s",
+        "--source-base-processing-version",
+        # required=True,
+        help="Base processing version (uuid or text) to tag imported sources with.",
+    )
+    parser.add_argument(
+        "-f",
+        "--forcedsource-base-processing-version",
+        # required=True,
+        help="Base processing version (uuid or text) to tag imported forced sources with.",
+    )
+    parser.add_argument(
+        "-H",
+        "--host-base-processing-version",
+        default=None,
+        help=("Base processing verson (uuid or text) to tag imported hosts with.  Not currently used."),
+    )
+    parser.add_argument("--t1", default=None, help="Only load alerts received through this time (UTC) (ISO format)")
+    parser.add_argument(
+        "-d",
+        "--debug-just-read-mongo",
+        default=False,
+        action="store_true",
+        help="Don't write to postgres (even temporary tables), just read mongo for timing.",
+    )
+    parser.add_argument("-v", "--verbose", action="store_true", default=False, help="Show debug log messages")
     args = parser.parse_args()
 
     if args.verbose:
@@ -782,17 +946,20 @@ def main():
     totnfrc = 0
     totninfo = 0
 
+    t0 = time.perf_counter()
     for collection_name in args.collection:
 
-        FDBLogger.info( f"Importing from {collection_name}*..." )
+        # FDBLogger.info( f"Importing from {collection_name}*..." )
 
-        si = SourceImporter( object_base_processing_version=args.object_base_processing_version,
-                             object_position_base_processing_version=args.object_position_base_processing_version,
-                             source_base_processing_version=args.source_base_processing_version,
-                             forcedsource_base_processing_version=args.forcedsource_base_processing_version,
-                             host_base_processing_version=args.host_base_processing_version,
-                             collection_base_name=collection_name,
-                             debug_just_read_mongo=args.debug_just_read_mongo )
+        si = SourceImporter(
+            object_base_processing_version=args.object_base_processing_version,
+            object_position_base_processing_version=args.object_position_base_processing_version,
+            source_base_processing_version=args.source_base_processing_version,
+            forcedsource_base_processing_version=args.forcedsource_base_processing_version,
+            host_base_processing_version=args.host_base_processing_version,
+            collection_base_name=collection_name,
+            debug_just_read_mongo=args.debug_just_read_mongo,
+        )
 
         try:
             nobj, nroot, npos, nsrc, nfrc, ninfo = si.import_from_mongo( t1=t1 )
@@ -801,8 +968,10 @@ def main():
             FDBLogger.error( "Fail." )
             sys.exit( 1 )
 
-        FDBLogger.info( f"...imported {nobj} objects, {nroot} root objects, {npos} object positions, "
-                        f"{nsrc} sources, {nfrc} forced sources, {ninfo} broker infos from {collection_name}" )
+        # FDBLogger.info(
+        #     f"...imported {nobj} objects, {nroot} root objects, {npos} object positions, "
+        #     f"{nsrc} sources, {nfrc} forced sources, {ninfo} broker infos from {collection_name}"
+        # )
         totnobj += nobj
         totnroot += nroot
         totnpos += npos
@@ -810,8 +979,12 @@ def main():
         totnfrc += nfrc
         totninfo += ninfo
 
-    FDBLogger.info( f"Overall, imported {totnobj} objects, {totnroot} root objects, {totnpos} object positions, "
-                    f"{totnsrc} sources, {totnfrc} forced sources, {totninfo} broker infos." )
+    t1 = time.perf_counter()
+    FDBLogger.info(
+        f"Overall, imported {totnobj} objects, {totnroot} root objects, {totnpos} object positions, "
+        f"{totnsrc} sources, {totnfrc} forced sources, {totninfo} broker infos."
+    )
+    FDBLogger.info(f"Time to import: {t1-t0:.3f} seconds")
 
 
 # ======================================================================

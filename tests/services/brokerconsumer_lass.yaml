@@ -1,0 +1,24 @@
+brokers:
+  lass:
+    class: LassConsumer
+    server: lassbroker:9092
+    groupid: lass-test-{barf}
+    topics: ["lass-topic"]
+    schemaless: True
+    schemafile: /fastdb/share/avsc/lsst.v10_0.alert.avsc
+    schema_in_key: False
+    updatetopics: false
+    brokername_for_alerts: "Lass"
+    mongodb_collection_base: fastdb_lass_test
+    cache_alerts: true
+    loggername: LASS
+    loggername_prefix: ""
+    batch_size: 10
+    consume_timeout: 1
+    nomsg_sleeptime: 1
+    extraconfig: null
+    extraconfigjson: null
+    pollkwargs:
+      restart_time_min: 0.1666667
+      notopic_sleeptime: 2
+      max_restarts: null

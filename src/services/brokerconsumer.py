@@ -1,25 +1,26 @@
-import sys
-import os
-import io
-import re
-import random
-import collections
-import time
-import yaml
-import datetime
-import traceback
-import pathlib
-import urllib
-import logging
 import argparse
+import collections
+import datetime
+import io
+import logging
 import multiprocessing
+import os
+import pathlib
+import pickle
+import random
+import re
 import signal
-import simplejson
+import sys
+import time
+import traceback
+import urllib
 
-import numpy as np
 import confluent_kafka
 import fastavro
+import numpy as np
 import pymongo
+import simplejson
+import yaml
 
 import db
 from kafka_consumer import KafkaConsumer
@@ -28,6 +29,7 @@ from kafka_consumer import KafkaConsumer
 _default_brokermessage_schemafile = "/fastdb/share/avsc/fastdb.v10_0_0.BrokerMessage.avsc"
 
 from concurrent.futures import ThreadPoolExecutor  # for pittgoogle
+
 import pittgoogle
 
 _rundir = pathlib.Path(__file__).parent
@@ -642,11 +644,12 @@ class BrokerConsumer:
                  'thumbnailses': thumbnailses,
                  'brokerinfos': brokerinfos }
 
-    def handle_message_batch( self, msgs ):
+    def handle_message_batch(self, msgs: list) -> None:
         messagebatch = []
-        self.countlogger.info( f"Handling {len(msgs)} messages; consumer has received "
-                               f"{self.consumer.tot_handled} messages." )
-        now = datetime.datetime.now( tz=datetime.UTC )
+        self.countlogger.info(
+            f"Handling {len(msgs)} messages; consumer has received {self.consumer.tot_handled} messages."
+        )
+        now = datetime.datetime.now(tz=datetime.UTC)
         t0 = time.perf_counter()
         for msg in msgs:
             timestamptype, timestamp = msg.timestamp()
@@ -654,66 +657,69 @@ class BrokerConsumer:
             if timestamptype == confluent_kafka.TIMESTAMP_NOT_AVAILABLE:
                 timestamp = None
             else:
-                timestamp = datetime.datetime.fromtimestamp( timestamp / 1000 )
+                timestamp = datetime.datetime.fromtimestamp(timestamp / 1000)
 
             key = msg.key()
             payload = msg.value()
             if self.schemaless:
-                alert = fastavro.schemaless_reader( io.BytesIO( payload ), self.schema )
+                alert = fastavro.schemaless_reader(io.BytesIO(payload), self.schema)
             else:
                 if self.schema_in_key:
-                    if isinstance( key, bytes ):
-                        key = key.decode( "utf-8" )
-                    parsed_schema = fastavro.schema.parse_schema( simplejson.loads( key ) )
-                    alert = fastavro.schemaless_reader( io.BytesIO( payload ), parsed_schema )
+                    if isinstance(key, bytes):
+                        key = key.decode("utf-8")
+                    parsed_schema = fastavro.schema.parse_schema(simplejson.loads(key))
+                    alert = fastavro.schemaless_reader(io.BytesIO(payload), parsed_schema)
                 else:
                     # ...there may be a better way than instantiating a new reader for every
                     #   message.  Figure it out.
-                    reader = fastavro.read.reader( io.BytesIO( payload ) )
-                    alertlist = [ m for m in reader ]
+                    reader = fastavro.read.reader(io.BytesIO(payload))
+                    alertlist = [m for m in reader]
                     if len(alertlist) != 1:
-                        raise RuntimeError( "This should never happen." )
+                        raise RuntimeError("This should never happen.")
                     alert = alertlist[0]
 
             if self.brokername_for_alerts is not None:
                 bname = self.brokername_for_alerts
             elif self.brokername_key is not None:
-                bname = alert[ self.brokername_key ]
+                bname = alert[self.brokername_key]
             else:
                 bname = self._brokername
 
-            messagebatch.append( { 'brokername': bname,
-                                   'topic': msg.topic(),
-                                   'msgoffset': msg.offset(),
-                                   'timestamp': timestamp,
-                                   'savetime': now,
-                                   'msg': alert } )
+            messagebatch.append({
+                "brokername": bname,
+                "topic": msg.topic(),
+                "msgoffset": msg.offset(),
+                "timestamp": timestamp,
+                "savetime": now,
+                "msg": alert,
+            })
 
         t1 = time.perf_counter()
         if self.no_wrangle:
             wrangled = {}
         else:
-            wrangled = self.alert_wrangler( messagebatch )
+            wrangled = self.alert_wrangler(messagebatch)
         t2 = time.perf_counter()
-        nadded = self.mongodb_store( messagebatch=messagebatch, **wrangled )
+        nadded = self.mongodb_store(messagebatch=messagebatch, **wrangled)
         t3 = time.perf_counter()
 
         strio = io.StringIO()
-        strio.write( f"...added to mongodb:\n"
-                     f"              {nadded['diaobject']} diaobject\n"
-                     f"              {nadded['diasource']} diasource\n"
-                     f"              {nadded['diasource_extra']} diasource_extra\n"
-                     f"              {nadded['diaforcedsource']} diaforcedsource\n"
-                     f"              {nadded['diaforcedsource_extra']} diaforcedsource_extra\n"
-                     f"              {nadded['thumbnails']} thumbnails\n"
-                     f"              {nadded['brokerinfo']} brokerinfo"
-                    )
+        strio.write(
+            f"...added to mongodb:\n"
+            f"              {nadded['diaobject']} diaobject\n"
+            f"              {nadded['diasource']} diasource\n"
+            f"              {nadded['diasource_extra']} diasource_extra\n"
+            f"              {nadded['diaforcedsource']} diaforcedsource\n"
+            f"              {nadded['diaforcedsource_extra']} diaforcedsource_extra\n"
+            f"              {nadded['thumbnails']} thumbnails\n"
+            f"              {nadded['brokerinfo']} brokerinfo"
+        )
         if self.cache_alerts:
-            strio.write( f"\n              {nadded['alertcache']} cached alerts" )
-        strio.write( f"\n   ...parse time: {t1-t0:.3f}\n" )
-        strio.write( f"   ...wrangle time: {t2-t1:.3f}\n" )
-        strio.write( f"   ...store time: {t3-t2:.3f}" )
-        self.countlogger.info( strio.getvalue() )
+            strio.write(f"\n              {nadded['alertcache']} cached alerts")
+        strio.write(f"\n   ...parse time: {t1 - t0:.3f}\n")
+        strio.write(f"   ...wrangle time: {t2 - t1:.3f}\n")
+        strio.write(f"   ...store time: {t3 - t2:.3f}")
+        self.countlogger.info(strio.getvalue())
 
 
     def mongodb_store( self, objects=[], sources=[], sources_extra=[],
@@ -763,9 +769,14 @@ class BrokerConsumer:
         # ****
         return inserted
 
-
-    def poll( self, reset=False, restart_time=datetime.timedelta(minutes=30),
-              notopic_sleeptime=300, max_restarts=None, max_msgs=None ):
+    def poll(
+        self,
+        reset=False,
+        restart_time=datetime.timedelta(minutes=30),
+        notopic_sleeptime=300,
+        max_restarts=None,
+        max_msgs=None,
+    ):
         """Poll the server, saving consumed messages to the Mongo DB.
 
         Parameters
@@ -820,10 +831,13 @@ class BrokerConsumer:
                     self.logger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
                     self.countlogger.info( f"Subscribed to topics: {self.consumer.topics}; starting poll loop." )
                     try:
-                        happy = self.consumer.poll_loop( handler=self.handle_message_batch, pipe=self.pipe,
-                                                         stopafter=restart_time,
-                                                         stopafternmessages=max_msgs,
-                                                         stopafternsleeps=None )
+                        happy = self.consumer.poll_loop(
+                            handler=self.handle_message_batch,
+                            pipe=self.pipe,
+                            stopafter=restart_time,
+                            stopafternmessages=max_msgs,
+                            stopafternsleeps=None,
+                        )
                         if happy:
                             strio.write( f"Reached poll timeout and/or message limit for {self.server}; "
                                          f"handled {self.consumer.tot_handled} messages.  " )
@@ -842,24 +856,30 @@ class BrokerConsumer:
 
                     except Exception as e:
                         otherstrio = io.StringIO("")
-                        traceback.print_exc( file=otherstrio )
+                        traceback.print_exc(file=otherstrio)
                         num_exceptions += 1
                         if num_exceptions >= max_exceptions:
                             self.close_connection()
-                            strio.write( f"Exception polling: {str(e)}.  Exiting after {num_exceptions} exceptions.\n"
-                                         f"{otherstrio.getValue()}" )
-                            self.logger.error( strio.getvalue() )
+                            strio.write(
+                                f"Exception polling: {str(e)}.  Exiting after {num_exceptions} exceptions.\n"
+                                f"{otherstrio.getValue()}"
+                            )
+                            self.logger.error(strio.getvalue())
                             tot_handled = self.consumer.tot_handled
                             self.close_connection()
                             if self.pipe is not None:
-                                self.pipe.send( { "message": "too many exceptions", "nconsumed": -1,
-                                                  "tot_handled": tot_handled,
-                                                  "runtime": datetime.datetime.now() - tstart } )
+                                self.pipe.send(
+                                    {
+                                        "message": "too many exceptions",
+                                        "nconsumed": -1,
+                                        "tot_handled": tot_handled,
+                                        "runtime": datetime.datetime.now() - tstart,
+                                    }
+                                )
                             return
-                        else:
-                            strio.write( f"Exception polling: {str(e)}; will restart consumer.\n"
-                                         f"{otherstrio.getvalue()}" )
-                            self.logger.warning( strio.getvalue() )
+                        else: # this just writes to log but doesn't do anythig
+                            strio.write(f"Exception polling: {str(e)}; will restart consumer.\n{otherstrio.getvalue()}")
+                            self.logger.warning(strio.getvalue())
 
                 if ( max_restarts is not None ) and ( n_restarts >= max_restarts ):
                     strio.write( f"Exiting after {n_restarts} restarts." )
@@ -917,6 +937,89 @@ class FinkConsumer(BrokerConsumer):
         super().__init__( server, groupid, **kwargs )
         self.logger.info( f"Fink group id is {groupid}" )
 
+
+# ======================================================================
+
+class LassConsumer(BrokerConsumer):
+    _brokername = 'lass'
+
+    def __init__( self, server='lassbroker:9092', groupid=None, **kwargs ):
+        # self.test_loop(server, groupid)
+        super().__init__( server, groupid, **kwargs )
+        self.logger.info( f"Lass group id is {groupid}" )
+
+    def test_loop(self, server, groupid):
+        cons = confluent_kafka.Consumer({
+            "bootstrap.servers": server,
+            "group.id": groupid,
+            "auto.offset.reset": "earliest"
+        })
+        cons.subscribe(["lass-topic"])
+        while True:
+            msg = cons.poll(1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                print("Consumer error: {}".format(msg.error()))
+                continue
+            alert = pickle.loads(msg.value())
+            print(alert['diaSourceId'])
+        cons.close()
+
+    def handle_message_batch(self, msgs: list) -> None:
+        """Callback that will process a batch of messages. This will run in the main thread."""
+        self.countlogger.info(
+            f"Handling {len(msgs)} messages; consumer has received {self.consumer.tot_handled} messages."
+        )
+        now = datetime.datetime.now(tz=datetime.UTC)
+        t0 = time.perf_counter()
+        messagebatch = []
+
+        for msg in msgs:
+            alert = pickle.loads(msg.value()) # this is typically not secure
+            timestamptype, timestamp = msg.timestamp()
+            if timestamptype == confluent_kafka.TIMESTAMP_NOT_AVAILABLE:
+                timestamp = None
+            else:
+                timestamp = datetime.datetime.fromtimestamp(timestamp / 1000)
+
+            messagebatch.append({
+                "brokername": self._brokername,
+                "topic": msg.topic(),
+                "msgoffset": msg.offset(),
+                "timestamp": timestamp,
+                "savetime": now,
+                "msg": alert,
+            })
+
+        self.logger.info(f"In handle_message_batch, received {len(msgs)} messages")
+        t1 = time.perf_counter()
+        if self.no_wrangle:
+            wrangled = {}
+        else:
+            wrangled = self.alert_wrangler(messagebatch)
+        t2 = time.perf_counter()
+        nadded = self.mongodb_store(messagebatch=messagebatch, **wrangled)
+        t3 = time.perf_counter()
+
+        ## Logging
+        strio = io.StringIO()
+        strio.write(
+            f"...added to mongodb:\n"
+            f"              {nadded['diaobject']} diaobject\n"
+            f"              {nadded['diasource']} diasource\n"
+            f"              {nadded['diasource_extra']} diasource_extra\n"
+            f"              {nadded['diaforcedsource']} diaforcedsource\n"
+            f"              {nadded['diaforcedsource_extra']} diaforcedsource_extra\n"
+            f"              {nadded['thumbnails']} thumbnails\n"
+            f"              {nadded['brokerinfo']} brokerinfo"
+        )
+        if self.cache_alerts:
+            strio.write(f"\n              {nadded['alertcache']} cached alerts")
+        strio.write(f"\n   ...parse time: {t1 - t0:.6f}\n")
+        strio.write(f"   ...wrangle time: {t2 - t1:.6f}\n")
+        strio.write(f"   ...store time: {t3 - t2:.6f}")
+        self.countlogger.info(strio.getvalue())
 
 # ======================================================================
 
@@ -1316,7 +1419,7 @@ class BrokerConsumerLauncher:
         # This is the grace period between when the main process tells launched broker to die and
         #   when it returns.
         # I chose 20s because (a)
-        self.shutdown_graceperiod=20
+        self.shutdown_graceperiod=1
 
 
     @classmethod
@@ -1351,9 +1454,12 @@ class BrokerConsumerLauncher:
         logger.setLevel( logging.DEBUG if self.verbose else logging.INFO )
 
         brokers = {}
-        clsmap = { 'BrokerConsumer': BrokerConsumer,
-                   'FinkConsumer': FinkConsumer,
-                   'PittGoogleConsumer': PittGoogleConsumer }
+        clsmap = {
+            "BrokerConsumer"     : BrokerConsumer,
+            "FinkConsumer"       : FinkConsumer,
+            "PittGoogleConsumer" : PittGoogleConsumer,
+            "LassConsumer"       : LassConsumer,
+        }
 
         config = yaml.safe_load( open( self.config ) )
         # ****
