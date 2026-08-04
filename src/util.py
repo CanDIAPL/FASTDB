@@ -34,8 +34,8 @@ _default_log_level = logging.INFO
 # Normally you don't want to show milliseconds, because it's additional gratuitous information
 #  that makes log output lines longer.  But, if you're debugging timing stuff, you might want
 #  temporarily to set this to True.
-# _show_millisec = True
-_show_millisec = False
+_show_millisec = True
+# _show_millisec = False
 
 # DEPRECATED -- don't use this, use FDBLogger
 logger = logging.getLogger( "FASTDB logger" )
@@ -142,9 +142,15 @@ class FDBLogger:
     def exception( cls, *args, **kwargs ):
         cls.get().exception( *args, **kwargs )
 
-    def __init__( self, midformat=None, datefmt=_default_datefmt,
-                  show_millisec=_show_millisec, level=_default_log_level,
-                  propagate =False ):
+    def __init__(
+        self,
+        midformat=None,
+        datefmt=_default_datefmt,
+        show_millisec=_show_millisec,
+        level=_default_log_level,
+        propagate=False,
+        filename=None
+    ):
         """Initialize a FDBLogger object, and the logging.Logger object it holds.
 
         Parameters
@@ -188,6 +194,11 @@ class FDBLogger:
         formatter = logging.Formatter( fmtstr, datefmt=datefmt )
         logout.setFormatter( formatter )
         self._logger.addHandler( logout )
+        if filename:
+            fileout = logging.FileHandler(filename)
+            fileout.setFormatter(formatter)
+            self._logger.addHandler(fileout)
+
         self._logger.setLevel( level )
 
 

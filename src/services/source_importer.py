@@ -949,7 +949,7 @@ def main():
     t0 = time.perf_counter()
     for collection_name in args.collection:
 
-        # FDBLogger.info( f"Importing from {collection_name}*..." )
+        FDBLogger.info( f"Importing from {collection_name}*..." )
 
         si = SourceImporter(
             object_base_processing_version=args.object_base_processing_version,
