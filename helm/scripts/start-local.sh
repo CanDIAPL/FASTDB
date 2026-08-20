@@ -25,6 +25,9 @@ if ! kind get clusters | grep -Fxq "$CLUSTER"; then
     kind create cluster --name "$CLUSTER" --config -
 fi
 
+echo "Building local shell image..."
+docker compose build createdb
+
 echo "Building FASTDB install/ with external URL $EXTERNAL_URL..."
 docker compose run --rm --entrypoint "" makeinstall /bin/bash -ec "
   touch aclocal.m4 configure
