@@ -53,15 +53,14 @@ helm/
 - Kubernetes cluster (Kind, SLAC S3DF, NERSC SPIN, etc.)
 - `helm` CLI installed
 - `kubectl` configured to access your cluster
-- A usable container runtime: Podman is preferred by `helm-deploy.sh`; Docker
-  is used automatically when Podman's machine is not running. On macOS, start
-  one with `podman machine start` or start Docker Desktop before deploying.
+- Docker Desktop for the recommended local Kind workflow. The general
+  `helm-deploy.sh` script can also use Podman for other deployments.
 - Docker images built and accessible
 - For private registries (GHCR, NERSC, etc.): a GitHub PAT with `read:packages` scope (see [Registry Credentials](#registry-credentials))
 
-The `helm/scripts/start-local.sh` helper uses Docker Compose and Docker image
-loading for Kind.  The general `scripts/helm-deploy.sh` supports Podman where
-the target environment and Kind setup support it.
+The local helper scripts use Docker Compose and Docker image loading for Kind.
+The general `scripts/helm-deploy.sh` supports Podman where the target
+environment and Kind setup support it.
 
 ### Recommended Local Kind Workflow
 
@@ -69,13 +68,19 @@ For a laptop development environment, use the provided helpers from the
 repository root:
 
 ```bash
-./helm/scripts/start-local.sh
+./helm/scripts/create-local-cluster.sh
+./helm/scripts/install-local-fastdb.sh
 ```
 
-The script creates the `fastdb-local` Kind cluster if needed, builds FASTDB
-with `http://localhost:8080/` as its external URL, builds and loads the local
-images into Kind, then deploys the local Helm values.  It is safe to re-run
-after changing FASTDB Python code, Helm templates, or local values.
+The first script only creates and checks the `fastdb-local` Kind cluster. The
+second script builds FASTDB with `http://localhost:8080/` as its external URL,
+builds and loads every required image, and installs the local Helm release.
+Keeping these steps separate makes it possible to update FASTDB without
+recreating the cluster or deleting its database volumes.
+
+Re-run `install-local-fastdb.sh` after changing FASTDB Python code, database
+migrations, container images, Helm templates, or local values. It recreates the
+`createdb` migration Job on every run, but preserves the database itself.
 
 After it finishes, check the deployment and open:
 
@@ -95,8 +100,8 @@ To delete the local cluster and all of its local FASTDB data:
 ./helm/scripts/stop-local.sh
 ```
 
-This is deliberately a reset, not a pause: the next `start-local.sh` creates a
-fresh cluster and database.
+This is deliberately a reset, not a pause: the next
+`create-local-cluster.sh` creates a fresh cluster and database environment.
 
 To create the fixed local test account (`test_user`) and open its password-reset
 page and MailHog message, run:
@@ -106,6 +111,10 @@ page and MailHog message, run:
 ```
 
 Enter the desired password manually on the opened reset page.
+
+The old combined workflow is temporarily retained as
+`helm/scripts/deprecated-start-local.sh`. It is deprecated and should only be
+used when reproducing the previous installation behavior.
 
 `values-local.yaml` is specifically for the local/laptop setup.  In particular, it
 contains host-network settings for a local Kafka broker (using the [LASS](https://github.com/CanDIAPL/lass) tool) and an ingestion configuration for the `lass-topic`; do not use it as the starting point for a

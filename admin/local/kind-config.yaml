@@ -1,7 +1,7 @@
 # Kind cluster config for local FASTDB Helm deployment.
 #
-# Used by scripts/helm-deploy.sh --create-cluster. The script replaces ${PWD}
-# with the repo root path before passing this file to `kind create cluster`.
+# Used by helm/scripts/create-local-cluster.sh. The script replaces ${PWD} with
+# the repo root path before passing this file to `kind create cluster`.
 #
 # extraMounts expose the host build tree inside the Kind node so pods can
 # mount /fastdb-install and /fastdb-db via hostPath (values-local.yaml:

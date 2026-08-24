@@ -12,6 +12,10 @@ global:
   imagePullPolicy: Never
   imagePullSecrets: []
 
+utilityImages:
+  busybox:
+    pullPolicy: Never
+
 # Use PVC for database storage, hostPath for code (via Kind extraMounts)
 volumes:
   type: pvc  # PVCs for database storage
@@ -87,6 +91,8 @@ queryrunner:
 # Mailhog with NodePort
 mailhog:
   enabled: true
+  image:
+    pullPolicy: Never
   externalAccess:
     enabled: true
     type: NodePort

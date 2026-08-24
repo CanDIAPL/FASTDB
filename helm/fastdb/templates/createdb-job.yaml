@@ -14,6 +14,11 @@ spec:
     spec:
       {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
       restartPolicy: OnFailure
+      initContainers:
+      - name: wait-for-postgres
+        image: {{ include "fastdb.externalImage" .Values.utilityImages.busybox }}
+        imagePullPolicy: {{ .Values.utilityImages.busybox.pullPolicy }}
+        command: ["sh", "-c", "until nc -z postgres 5432; do echo 'Waiting for PostgreSQL...'; sleep 2; done"]
       containers:
       - name: createdb
         image: {{ include "fastdb.image" (dict "image" .Values.createdb.image "global" .Values.global) }}

@@ -22,6 +22,7 @@ spec:
       containers:
       - name: mailhog
         image: {{ include "fastdb.externalImage" .Values.mailhog.image }}
+        imagePullPolicy: {{ .Values.mailhog.image.pullPolicy }}
         ports:
         - containerPort: 1025
           name: smtp

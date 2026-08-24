@@ -22,7 +22,8 @@ spec:
       {{- include "fastdb.imagePullSecrets" . | nindent 6 }}
       initContainers:
       - name: volume-mount-hack
-        image: busybox
+        image: {{ include "fastdb.externalImage" .Values.utilityImages.busybox }}
+        imagePullPolicy: {{ .Values.utilityImages.busybox.pullPolicy }}
         command: ["sh", "-c", "chown 100:108 /pgdata"]
         securityContext:
           runAsUser: 0

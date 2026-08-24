@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# Create/update the local Kind deployment used for FASTDB development.
+# DEPRECATED: retained temporarily for the previous local deployment workflow.
 set -euo pipefail
+
+echo "WARNING: this script is deprecated." >&2
+echo "Use these scripts for new local installations:" >&2
+echo "  ./helm/scripts/create-local-cluster.sh" >&2
+echo "  ./helm/scripts/install-local-fastdb.sh" >&2
+echo >&2
 
 FASTDB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CLUSTER="fastdb-local"
@@ -31,8 +37,8 @@ docker compose build createdb
 echo "Building FASTDB install/ with external URL $EXTERNAL_URL..."
 docker compose run --rm --entrypoint "" makeinstall /bin/bash -ec "
   touch aclocal.m4 configure
-  find . -name Makefile.am -exec touch {} \\;
-  find . -name Makefile.in -exec touch {} \\;
+  find . -name Makefile.am -exec touch {} \\\;
+  find . -name Makefile.in -exec touch {} \\\;
   ./configure \\
     --with-installdir=/fastdb \\
     --with-smtp-server=mailhog \\

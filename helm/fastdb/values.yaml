@@ -30,6 +30,14 @@ global:
   # owner: username
   # environment: dev
 
+# Small third-party images used by chart infrastructure.
+utilityImages:
+  busybox:
+    registry: docker.io
+    repository: library/busybox
+    tag: "1.36.1"
+    pullPolicy: IfNotPresent
+
 # Volume configuration
 volumes:
   # Type: "pvc" for persistent volume claims
@@ -201,8 +209,9 @@ mailhog:
   enabled: true
   image:
     repository: mailhog/mailhog
-    tag: "latest"
+    tag: "v1.0.1"
     registry: "docker.io"
+    pullPolicy: IfNotPresent
   replicas: 1
 
   externalAccess:
@@ -262,6 +271,12 @@ ingestion:
 walWebserver:
   enabled: false
   replicas: 1
+
+  image:
+    registry: docker.io
+    repository: library/nginx
+    tag: "1.27.4-alpine"
+    pullPolicy: IfNotPresent
 
   ingress:
     enabled: false
