@@ -115,6 +115,18 @@ if ! kubectl --context "$KUBE_CONTEXT" wait \
   exit 1
 fi
 
+echo "Restarting services that load FASTDB Python code..."
+for deployment_name in webap queryrunner brokerconsumer; do
+  if kubectl --context "$KUBE_CONTEXT" get deployment "$deployment_name" \
+    --namespace "$NAMESPACE" >/dev/null 2>&1; then
+    echo "  $deployment_name"
+    kubectl --context "$KUBE_CONTEXT" rollout restart \
+      "deployment/$deployment_name" --namespace "$NAMESPACE"
+    kubectl --context "$KUBE_CONTEXT" rollout status \
+      "deployment/$deployment_name" --namespace "$NAMESPACE" --timeout=120s
+  fi
+done
+
 echo
 kubectl --context "$KUBE_CONTEXT" get pods --namespace "$NAMESPACE"
 echo
