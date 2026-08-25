@@ -847,6 +847,7 @@ class SourceImporter:
                         t0 = mg.collection(f"{self.collection_base_name}_diasource").find_one(
                             sort={"savetime": 1} # pymongo.ASCENDING == 1
                         )['savetime']
+                        t0 = util.datetime_to_utc(t0, with_tz=True, now_on_none=False)
 
                 # To batch we need to make sure t0 is not None in `timeline`. But otherwise t0 can be None
                 if type(batch_mins) != int: raise ValueError("batch_mins argument must be integer.")
