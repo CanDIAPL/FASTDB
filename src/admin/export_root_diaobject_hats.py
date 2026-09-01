@@ -1,26 +1,9 @@
 """Export FASTDB root DIAObjects as a HATS catalog snapshot."""
 
 import argparse
-import os
 import pathlib
-import shutil
-import tempfile
 
-from root_hats import build_catalog
-EXPORT_QUERY = """COPY (
-    SELECT id::text AS rootid, ra, dec
-    FROM root_diaobject
-    WHERE ra IS NOT NULL AND dec IS NOT NULL
-    ORDER BY id
-) TO STDOUT WITH (FORMAT CSV, HEADER)"""
-
-
-def _write_input_csv(connection, destination):
-    """Stream root DIAObjects from PostgreSQL without holding them in memory."""
-    with connection.cursor() as cursor, destination.open("wb") as output:
-        with cursor.copy(EXPORT_QUERY) as copy:
-            for data in copy:
-                output.write(data)
+from root_hats import initialize_from_postgres
 
 
 def export_root_diaobject_hats(
@@ -46,28 +29,18 @@ def export_root_diaobject_hats(
     if workers < 1:
         raise ValueError("workers must be positive")
 
-    output_dir.parent.mkdir(parents=True, exist_ok=True)
-    staging_dir = pathlib.Path(
-        tempfile.mkdtemp(prefix=f".{output_dir.name}-", dir=output_dir.parent)
-    )
-    input_csv = staging_dir / "root_diaobject.csv"
-    try:
-        from db import DB
+    from db import DB
 
-        with DB(connection) as db_connection:
-            _write_input_csv(db_connection, input_csv)
-        build_catalog(
-            input_csv,
-            staging_dir,
+    with DB(connection) as db_connection:
+        created = initialize_from_postgres(
+            output_dir,
+            db_connection,
             pixel_threshold=pixel_threshold,
             margin_arcsec=margin_arcsec,
             workers=workers,
         )
-        input_csv.unlink()
-        os.rename(staging_dir, output_dir)
-    except Exception:
-        shutil.rmtree(staging_dir, ignore_errors=True)
-        raise
+    if not created:
+        raise RuntimeError("root_diaobject contains no positioned rows")
 
     return output_dir
 

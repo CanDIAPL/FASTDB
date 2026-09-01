@@ -160,7 +160,11 @@ class SourceImporter:
 
 
     def _append_new_hats_roots( self ):
-        if self.root_hats_dir is None or not self._new_root_hats_rows:
+        if self.root_hats_dir is None:
+            return
+        if not root_hats.catalog_exists( self.root_hats_dir ):
+            raise RuntimeError( "Cannot append roots before the HATS catalog is initialized" )
+        if not self._new_root_hats_rows:
             return
         rows = self._new_root_hats_rows
         FDBLogger.info( f"Appending {len(rows)} new roots to experimental HATS catalog" )
@@ -171,6 +175,26 @@ class SourceImporter:
             workers=1,
         )
         self._new_root_hats_rows = []
+
+
+    def _update_root_hats_after_commit( self, connection ):
+        if self.root_hats_dir is None:
+            return
+        if root_hats.catalog_exists( self.root_hats_dir ):
+            self._append_new_hats_roots()
+            return
+        FDBLogger.info( "Experimental HATS catalog is absent; attempting initial build" )
+        created = root_hats.initialize_from_postgres(
+            self.root_hats_dir,
+            connection,
+            margin_arcsec=max( 5., self.object_match_radius ),
+            workers=1,
+        )
+        if created:
+            FDBLogger.info( f"Initialized experimental HATS catalog at {self.root_hats_dir}" )
+            self._new_root_hats_rows = []
+        else:
+            FDBLogger.info( "No positioned root DIAObjects exist; HATS initialization deferred" )
 
 
     @classmethod
@@ -475,8 +499,8 @@ class SourceImporter:
             # TODO : test this with multiple processing versions and multiple
             #   objects that match!!!
             FDBLogger.debug( "   ...linking to existing root diaobjects..." )
-            if self.root_hats_dir is None:
-                FDBLogger.debug( "   ...No root_hats_dir, matching with Q3C..." )
+            if self.root_hats_dir is None or not root_hats.catalog_exists( self.root_hats_dir ):
+                FDBLogger.debug( "   ...HATS catalog unavailable, matching with Q3C..." )
                 dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id\n"
                                "FROM root_diaobject r\n"
                                "WHERE q3c_radial_query( r.ra, r.dec, tno.ra, tno.dec, %(rad)s)",
@@ -537,7 +561,7 @@ class SourceImporter:
             if commit:
                 FDBLogger.debug("   ...commiting objects" )
                 dbcon.commit()
-                self._append_new_hats_roots()
+                self._update_root_hats_after_commit( dbcon.con )
 
             return nobjs, nroot, npos
 
@@ -810,7 +834,7 @@ class SourceImporter:
                         mongosession.commit_transaction()
                         mongosession.end_session()
 
-                self._append_new_hats_roots()
+                self._update_root_hats_after_commit( dbcon.con )
 
                 FDBLogger.debug( "Done." )
 

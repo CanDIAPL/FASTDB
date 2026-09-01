@@ -56,6 +56,11 @@ After the PostgreSQL and MongoDB transactions commit, newly created roots are
 appended to the main catalog. Catalog metadata, sky maps, and the margin catalog
 are then refreshed.
 
+The snapshot directory may be absent on the first run. Until positioned roots
+exist, source importer uses Q3C and defers initialization. After the first run
+that commits positioned roots, it builds the initial HATS snapshot automatically;
+later runs use and increment that snapshot.
+
 This is a single-writer prototype. A failure after PostgreSQL commits but before
 the HATS update completes can leave HATS behind PostgreSQL. PostgreSQL remains
 authoritative; repair this state by building a new full snapshot. Do not run

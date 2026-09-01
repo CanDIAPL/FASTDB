@@ -69,11 +69,36 @@ def test_append_new_hats_roots( monkeypatch ):
         "append_roots",
         lambda path, rows, **kwargs: calls.append( ( path, rows, kwargs ) ),
     )
+    monkeypatch.setattr( root_hats, "catalog_exists", lambda path: True )
 
     importer._append_new_hats_roots()
 
     assert calls == [
         ( "/hats", new_rows, { "margin_arcsec": 5., "workers": 1 } )
+    ]
+    assert importer._new_root_hats_rows == []
+
+
+def test_initialize_root_hats_after_commit( monkeypatch ):
+    importer = SourceImporter.__new__( SourceImporter )
+    importer.root_hats_dir = "/hats"
+    importer.object_match_radius = 1.
+    importer._new_root_hats_rows = [
+        ( "00000000-0000-0000-0000-000000000001", 10., -20. )
+    ]
+    connection = object()
+    calls = []
+    monkeypatch.setattr( root_hats, "catalog_exists", lambda path: False )
+    monkeypatch.setattr(
+        root_hats,
+        "initialize_from_postgres",
+        lambda path, dbcon, **kwargs: calls.append( ( path, dbcon, kwargs ) ) or True,
+    )
+
+    importer._update_root_hats_after_commit( connection )
+
+    assert calls == [
+        ( "/hats", connection, { "margin_arcsec": 5., "workers": 1 } )
     ]
     assert importer._new_root_hats_rows == []
 

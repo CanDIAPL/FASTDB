@@ -9,7 +9,40 @@ import pytest
 from admin.export_root_diaobject_hats import (
     export_root_diaobject_hats,
 )
-from root_hats import CATALOG_NAME, MARGIN_NAME, append_roots, build_catalog, match_roots
+from root_hats import (
+    CATALOG_NAME,
+    MARGIN_NAME,
+    append_roots,
+    build_catalog,
+    initialize_from_postgres,
+    match_roots,
+)
+
+
+class _EmptyRootCursor:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return None
+
+    def execute(self, query):
+        assert query.startswith("SELECT count(*) FROM root_diaobject")
+
+    def fetchone(self):
+        return (0,)
+
+
+class _EmptyRootConnection:
+    def cursor(self):
+        return _EmptyRootCursor()
+
+
+def test_initialization_is_deferred_for_empty_database(tmp_path):
+    snapshot = tmp_path / "snapshot"
+
+    assert not initialize_from_postgres(snapshot, _EmptyRootConnection())
+    assert not snapshot.exists()
 
 
 def test_build_catalog_and_spatial_match(tmp_path):

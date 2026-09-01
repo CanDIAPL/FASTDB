@@ -17,6 +17,12 @@ import pandas as pd
 
 CATALOG_NAME = "root_diaobject"
 MARGIN_NAME = "root_diaobject_margin"
+EXPORT_QUERY = """COPY (
+    SELECT id::text AS rootid, ra, dec
+    FROM root_diaobject
+    WHERE ra IS NOT NULL AND dec IS NOT NULL
+    ORDER BY id
+) TO STDOUT WITH (FORMAT CSV, HEADER)"""
 
 
 def _hats_imports():
@@ -114,6 +120,66 @@ def build_catalog(input_csv, output_dir, *, pixel_threshold=1_000_000, margin_ar
         margin_arcsec=margin_arcsec,
         workers=workers,
     )
+
+
+def catalog_exists(snapshot_dir):
+    """Return whether both the main and margin catalogs appear initialized."""
+    snapshot_dir = pathlib.Path(snapshot_dir)
+    return all(
+        (snapshot_dir / name / "hats.properties").is_file()
+        for name in (CATALOG_NAME, MARGIN_NAME)
+    )
+
+
+def _write_postgres_csv(connection, destination):
+    with connection.cursor() as cursor, destination.open("wb") as output:
+        with cursor.copy(EXPORT_QUERY) as copy:
+            for data in copy:
+                output.write(data)
+
+
+def initialize_from_postgres(
+    snapshot_dir,
+    connection,
+    *,
+    pixel_threshold=1_000_000,
+    margin_arcsec=5.0,
+    workers=1,
+):
+    """Atomically create the first snapshot, or return False when no roots exist."""
+    snapshot_dir = pathlib.Path(snapshot_dir).expanduser().resolve()
+    if catalog_exists(snapshot_dir):
+        return False
+    if snapshot_dir.exists():
+        raise FileExistsError(f"HATS snapshot path exists but is not a valid catalog: {snapshot_dir}")
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT count(*) FROM root_diaobject WHERE ra IS NOT NULL AND dec IS NOT NULL"
+        )
+        if cursor.fetchone()[0] == 0:
+            return False
+
+    snapshot_dir.parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = pathlib.Path(
+        tempfile.mkdtemp(prefix=f".{snapshot_dir.name}-", dir=snapshot_dir.parent)
+    )
+    input_csv = staging_dir / "root_diaobject.csv"
+    try:
+        _write_postgres_csv(connection, input_csv)
+        build_catalog(
+            input_csv,
+            staging_dir,
+            pixel_threshold=pixel_threshold,
+            margin_arcsec=margin_arcsec,
+            workers=workers,
+        )
+        input_csv.unlink()
+        os.rename(staging_dir, snapshot_dir)
+    except Exception:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
+    return True
 
 
 def match_roots(snapshot_dir, inputs, radius_arcsec):
