@@ -6,12 +6,76 @@ import textwrap
 import time
 
 import db
+import root_hats
 import psycopg.errors
 import pytest
 from psycopg import sql
 from services.brokerconsumer import FinkConsumer
 from services.source_importer import SourceImporter
 from util import FDBLogger, datetime_to_utc, env_as_bool
+
+
+class _HatsTestCursor:
+    def __init__( self ):
+        self.inserted = None
+
+    def executemany( self, query, rows ):
+        self.inserted = ( query, rows )
+
+
+class _HatsTestDBCon:
+    def __init__( self, inputs ):
+        self.inputs = inputs
+        self.cursor = _HatsTestCursor()
+        self.queries = []
+
+    def execute( self, query ):
+        self.queries.append( query )
+        if query.startswith( "SELECT diaobjectid" ):
+            return self.inputs, [ "diaobjectid", "ra", "dec" ]
+        return [], []
+
+
+def test_link_to_hats_roots( monkeypatch ):
+    importer = SourceImporter.__new__( SourceImporter )
+    importer.root_hats_dir = "/hats"
+    importer.object_match_radius = 1.
+    connection = _HatsTestDBCon( [ ( 101, 10., -20. ), ( 102, 30., 5. ) ] )
+    monkeypatch.setattr(
+        root_hats,
+        "match_roots",
+        lambda path, rows, radius: { 101: "00000000-0000-0000-0000-000000000001" },
+    )
+
+    importer._link_to_hats_roots( connection )
+
+    assert connection.cursor.inserted[1] == [
+        ( 101, "00000000-0000-0000-0000-000000000001" )
+    ]
+    assert any( query.startswith( "UPDATE temp_new_diaobject" ) for query in connection.queries )
+
+
+def test_append_new_hats_roots( monkeypatch ):
+    importer = SourceImporter.__new__( SourceImporter )
+    importer.root_hats_dir = "/hats"
+    importer.object_match_radius = 1.
+    new_rows = [
+        ( "00000000-0000-0000-0000-000000000001", 10., -20. )
+    ]
+    importer._new_root_hats_rows = new_rows
+    calls = []
+    monkeypatch.setattr(
+        root_hats,
+        "append_roots",
+        lambda path, rows, **kwargs: calls.append( ( path, rows, kwargs ) ),
+    )
+
+    importer._append_new_hats_roots()
+
+    assert calls == [
+        ( "/hats", new_rows, { "margin_arcsec": 5., "workers": 1 } )
+    ]
+    assert importer._new_root_hats_rows == []
 
 # Ordering of these tests matters, because they use module scope
 # fixtures from tests/fixtures/alertcycle.py (the "alerts*" fixtures).

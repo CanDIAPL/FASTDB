@@ -7,11 +7,9 @@ import lsdb
 import pytest
 
 from admin.export_root_diaobject_hats import (
-    CATALOG_NAME,
-    MARGIN_NAME,
-    _build_catalog,
     export_root_diaobject_hats,
 )
+from root_hats import CATALOG_NAME, MARGIN_NAME, append_roots, build_catalog, match_roots
 
 
 def test_build_catalog_and_spatial_match(tmp_path):
@@ -24,7 +22,7 @@ def test_build_catalog_and_spatial_match(tmp_path):
         writer.writerow([ids[1], 10.0001, -20.0])
         writer.writerow([ids[2], 200.0, 30.0])
 
-    _build_catalog(input_csv, tmp_path, pixel_threshold=2, margin_arcsec=5.0, workers=1)
+    build_catalog(input_csv, tmp_path, pixel_threshold=2, margin_arcsec=5.0, workers=1)
 
     catalog_path = tmp_path / CATALOG_NAME
     margin_path = tmp_path / MARGIN_NAME
@@ -37,6 +35,16 @@ def test_build_catalog_and_spatial_match(tmp_path):
     roots = lsdb.read_hats(catalog_path, margin_cache=margin_path)
     near_first = roots.cone_search(10.0, -20.0, radius_arcsec=1.0).compute()
     assert set(near_first["rootid"]) == {str(ids[0]), str(ids[1])}
+
+    appended_id = uuid.uuid4()
+    append_roots(tmp_path, [(appended_id, 150.0, 5.0)], margin_arcsec=5.0, workers=1)
+    updated = lsdb.read_hats(catalog_path, margin_cache=margin_path)
+    assert len(updated) == 4
+    near_appended = updated.cone_search(150.0, 5.0, radius_arcsec=1.0).compute()
+    assert set(near_appended["rootid"]) == {str(appended_id)}
+    assert match_roots(tmp_path, [(42, 150.0001, 5.0)], radius_arcsec=1.0) == {
+        42: str(appended_id)
+    }
 
 
 def test_export_refuses_to_replace_snapshot(tmp_path):

@@ -22,6 +22,7 @@ import traceback
 
 import psycopg.sql as sql
 import db
+import root_hats
 import util
 from util import FDBLogger
 
@@ -69,6 +70,7 @@ class SourceImporter:
                   host_base_processing_version=None,
                   collection_base_name=None,
                   object_match_radius=1.,
+                  root_hats_dir=None,
                   debug_just_read_mongo=False ):
         """Create a SourceImporter.
 
@@ -102,6 +104,10 @@ class SourceImporter:
             Objects within this many arcsec of an existing object will be considered
             the same root_diaobject.
 
+          root_hats_dir : str or None, default None
+            Experimental. If provided, match roots with the HATS snapshot in
+            this directory and append new roots after PostgreSQL commits.
+
           debug_just_read_mongo : bool, default False
             This is for timing debugging.  If this is given, then nothing will be
             written to postgres (not even writing temporary tables), instead just
@@ -125,8 +131,44 @@ class SourceImporter:
                                                                           'diaforcedsource' )
         # self.host_base_processing_version = util.base_procver_id( host_base_processing_version )
         self.object_match_radius = float( object_match_radius )
+        self.root_hats_dir = root_hats_dir
+        self._new_root_hats_rows = []
 
         self.debug_just_read_mongo = bool( debug_just_read_mongo )
+
+
+    def _link_to_hats_roots( self, dbcon ):
+        rows, _cols = dbcon.execute(
+            "SELECT diaobjectid, ra, dec FROM temp_new_diaobject "
+            "WHERE rootid IS NULL AND ra IS NOT NULL AND dec IS NOT NULL"
+        )
+        matches = root_hats.match_roots( self.root_hats_dir, rows, self.object_match_radius )
+        if not matches:
+            return
+        dbcon.execute( "DROP TABLE IF EXISTS temp_hats_root_match" )
+        dbcon.execute( "CREATE TEMP TABLE temp_hats_root_match (diaobjectid bigint, rootid uuid)" )
+        dbcon.cursor.executemany(
+            "INSERT INTO temp_hats_root_match(diaobjectid, rootid) VALUES (%s, %s)",
+            [ ( diaobjectid, rootid ) for diaobjectid, rootid in matches.items() ]
+        )
+        dbcon.execute(
+            "UPDATE temp_new_diaobject obj SET rootid=match.rootid "
+            "FROM temp_hats_root_match match WHERE obj.diaobjectid=match.diaobjectid"
+        )
+
+
+    def _append_new_hats_roots( self ):
+        if self.root_hats_dir is None or not self._new_root_hats_rows:
+            return
+        rows = self._new_root_hats_rows
+        FDBLogger.info( f"Appending {len(rows)} new roots to experimental HATS catalog" )
+        root_hats.append_roots(
+            self.root_hats_dir,
+            rows,
+            margin_arcsec=max( 5., self.object_match_radius ),
+            workers=1,
+        )
+        self._new_root_hats_rows = []
 
 
     @classmethod
@@ -431,10 +473,13 @@ class SourceImporter:
             # TODO : test this with multiple processing versions and multiple
             #   objects that match!!!
             FDBLogger.debug( "   ...linking to existing root diaobjects..." )
-            dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id\n"
-                           "FROM root_diaobject r\n"
-                           "WHERE q3c_radial_query( r.ra, r.dec, tno.ra, tno.dec, %(rad)s)",
-                           { 'rad': self.object_match_radius/3600. } )
+            if self.root_hats_dir is None:
+                dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id\n"
+                               "FROM root_diaobject r\n"
+                               "WHERE q3c_radial_query( r.ra, r.dec, tno.ra, tno.dec, %(rad)s)",
+                               { 'rad': self.object_match_radius/3600. } )
+            else:
+                self._link_to_hats_roots( dbcon )
 
             # Create new root objects
             FDBLogger.debug( "   ...creating new root diaobjects..." )
@@ -462,6 +507,10 @@ class SourceImporter:
             dbcon.execute( "INSERT INTO root_diaobject(id, ra, dec) ( SELECT id, ra, dec FROM temp_new_root_obj )" )
             nroot = dbcon.cursor.rowcount
             FDBLogger.debug( f"      ...inserted {nroot} objects" )
+            rows, _cols = dbcon.execute(
+                "SELECT id::text, ra, dec FROM temp_new_root_obj WHERE ra IS NOT NULL AND dec IS NOT NULL"
+            )
+            self._new_root_hats_rows = rows
 
             # Add the new objects.
             FDBLogger.debug( "   ...inserting new diaobjects into diaobject table..." )
@@ -484,6 +533,7 @@ class SourceImporter:
             if commit:
                 FDBLogger.debug("   ...commiting objects" )
                 dbcon.commit()
+                self._append_new_hats_roots()
 
             return nobjs, nroot, npos
 
@@ -756,6 +806,8 @@ class SourceImporter:
                         mongosession.commit_transaction()
                         mongosession.end_session()
 
+                self._append_new_hats_roots()
+
                 FDBLogger.debug( "Done." )
 
             return nobj, nroot, npos, nsrc, nfrc, ninfo
@@ -787,6 +839,9 @@ def main():
                          help=( "Base processing verson (uuid or text) to tag imported hosts with.  "
                                 "Not currently used." ) )
     parser.add_argument( "--t1", default=None, help="Only load alerts received through this time (UTC) (ISO format)" )
+    parser.add_argument( "--root-hats-dir", default=None,
+                         help=( "Experimental root DIAObject HATS snapshot directory. If set, use HATS instead "
+                                "of Q3C and append newly created roots after commit." ) )
     parser.add_argument( "-d", "--debug-just-read-mongo", default=False, action='store_true',
                          help="Don't write to postgres (even temporary tables), just read mongo for timing." )
     parser.add_argument( "-v", "--verbose", action='store_true', default=False,
@@ -817,6 +872,7 @@ def main():
                              forcedsource_base_processing_version=args.forcedsource_base_processing_version,
                              host_base_processing_version=args.host_base_processing_version,
                              collection_base_name=collection_name,
+                             root_hats_dir=args.root_hats_dir,
                              debug_just_read_mongo=args.debug_just_read_mongo )
 
         try:

@@ -6,9 +6,7 @@ import pathlib
 import shutil
 import tempfile
 
-
-CATALOG_NAME = "root_diaobject"
-MARGIN_NAME = "root_diaobject_margin"
+from root_hats import build_catalog
 EXPORT_QUERY = """COPY (
     SELECT id::text AS rootid, ra, dec
     FROM root_diaobject
@@ -23,45 +21,6 @@ def _write_input_csv(connection, destination):
         with cursor.copy(EXPORT_QUERY) as copy:
             for data in copy:
                 output.write(data)
-
-
-def _build_catalog(input_csv, staging_dir, pixel_threshold, margin_arcsec, workers):
-    """Build the main HATS catalog and its cross-match margin catalog."""
-    try:
-        from hats_import import ImportArguments, MarginCacheArguments, pipeline
-        from hats_import.catalog.file_readers.csv import CsvPyarrowReader
-    except ImportError as exc:
-        raise RuntimeError(
-            "HATS export requires hats-import. Install FASTDB's HATS dependencies first."
-        ) from exc
-
-    import_args = ImportArguments(
-        input_file_list=[input_csv],
-        file_reader=CsvPyarrowReader(column_names=["rootid", "ra", "dec"]),
-        output_path=staging_dir,
-        output_artifact_name=CATALOG_NAME,
-        catalog_type="object",
-        ra_column="ra",
-        dec_column="dec",
-        sort_columns="rootid",
-        pixel_threshold=pixel_threshold,
-        dask_n_workers=workers,
-        progress_bar=True,
-        resume=False,
-    )
-    pipeline(import_args)
-
-    main_catalog = staging_dir / CATALOG_NAME
-    margin_args = MarginCacheArguments(
-        input_catalog_path=main_catalog,
-        output_path=staging_dir,
-        output_artifact_name=MARGIN_NAME,
-        margin_threshold=margin_arcsec,
-        dask_n_workers=workers,
-        progress_bar=True,
-        resume=False,
-    )
-    pipeline(margin_args)
 
 
 def export_root_diaobject_hats(
@@ -97,7 +56,13 @@ def export_root_diaobject_hats(
 
         with DB(connection) as db_connection:
             _write_input_csv(db_connection, input_csv)
-        _build_catalog(input_csv, staging_dir, pixel_threshold, margin_arcsec, workers)
+        build_catalog(
+            input_csv,
+            staging_dir,
+            pixel_threshold=pixel_threshold,
+            margin_arcsec=margin_arcsec,
+            workers=workers,
+        )
         input_csv.unlink()
         os.rename(staging_dir, output_dir)
     except Exception:

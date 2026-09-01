@@ -36,3 +36,27 @@ The destination must not exist. It is published only after both
 `root_diaobject` and its `root_diaobject_margin` catalog have been built
 successfully. Use `--margin-arcsec` to set the largest cross-match radius the
 margin catalog must support.
+
+The resulting catalog uses per-pixel directories so that experimental
+incremental updates can add new Parquet files without rewriting existing
+partitions.
+
+### Experimental source-importer integration
+
+Pass the snapshot directory to `source_importer.py` to replace its Q3C root
+match with an LSDB nearest-neighbor match:
+
+```sh
+python /fastdb/services/source_importer.py \
+    --root-hats-dir /data/root-diaobject-snapshot \
+    ...the existing source-importer arguments...
+```
+
+After the PostgreSQL and MongoDB transactions commit, newly created roots are
+appended to the main catalog. Catalog metadata, sky maps, and the margin catalog
+are then refreshed.
+
+This is a single-writer prototype. A failure after PostgreSQL commits but before
+the HATS update completes can leave HATS behind PostgreSQL. PostgreSQL remains
+authoritative; repair this state by building a new full snapshot. Do not run
+concurrent HATS-enabled source importers against the same snapshot.
