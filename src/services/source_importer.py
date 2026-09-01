@@ -138,10 +138,12 @@ class SourceImporter:
 
 
     def _link_to_hats_roots( self, dbcon ):
+        #get the RA,DEC from the data we are importing
         rows, _cols = dbcon.execute(
             "SELECT diaobjectid, ra, dec FROM temp_new_diaobject "
             "WHERE rootid IS NULL AND ra IS NOT NULL AND dec IS NOT NULL"
         )
+        #match to the existing HATS file
         matches = root_hats.match_roots( self.root_hats_dir, rows, self.object_match_radius )
         if not matches:
             return
@@ -474,11 +476,13 @@ class SourceImporter:
             #   objects that match!!!
             FDBLogger.debug( "   ...linking to existing root diaobjects..." )
             if self.root_hats_dir is None:
+                FDBLogger.debug( "   ...No root_hats_dir, matching with Q3C..." )
                 dbcon.execute( "UPDATE temp_new_diaobject tno SET rootid=r.id\n"
                                "FROM root_diaobject r\n"
                                "WHERE q3c_radial_query( r.ra, r.dec, tno.ra, tno.dec, %(rad)s)",
                                { 'rad': self.object_match_radius/3600. } )
             else:
+                FDBLogger.debug( "   ...matching with HATS..." )
                 self._link_to_hats_roots( dbcon )
 
             # Create new root objects
