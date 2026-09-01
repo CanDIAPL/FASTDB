@@ -80,7 +80,9 @@ RUN source /venv/bin/activate && \
        flask-sock==0.7.0 \
        gevent==25.9.1 \
        gunicorn==25.1.0 \
-       nested-pandas==0.6.8 \
+       hats-import==0.10.4 \
+       lsdb==0.10.4 \
+       nested-pandas==0.6.10 \
        numpy==2.4.3 \
        pandas==2.3.3 \
        pittgoogle-client==0.3.19 \
