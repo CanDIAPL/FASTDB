@@ -4,7 +4,10 @@ import argparse
 import pathlib
 import time
 
+import astropy.units as u
+import numpy as np
 import pandas as pd
+from astropy.coordinates import SkyCoord
 
 
 def _sample_inputs(connection, sample_size):
@@ -18,6 +21,26 @@ def _sample_inputs(connection, sample_size):
             (sample_size,),
         )
         return cursor.fetchall()
+
+
+def _offset_inputs(inputs, offset_arcsec, seed):
+    """Move coordinates by a fixed distance in reproducible random directions."""
+    if offset_arcsec == 0:
+        return inputs
+
+    random = np.random.default_rng(seed)
+    coordinates = SkyCoord(
+        ra=[row[1] for row in inputs] * u.deg,
+        dec=[row[2] for row in inputs] * u.deg,
+    )
+    moved = coordinates.directional_offset_by(
+        random.uniform(0, 360, len(inputs)) * u.deg,
+        offset_arcsec * u.arcsec,
+    )
+    return [
+        (row[0], float(ra), float(dec))
+        for row, ra, dec in zip(inputs, moved.ra.deg, moved.dec.deg, strict=True)
+    ]
 
 
 def _match_with_q3c(connection, inputs, radius_arcsec):
@@ -160,7 +183,14 @@ def _classify_matches(q3c_matches, hats_matches, candidate_counts, q3c_distances
     return classifications
 
 
-def benchmark(snapshot_dir, sample_size=10_000, radius_arcsec=1.0, connection=None):
+def benchmark(
+    snapshot_dir,
+    sample_size=10_000,
+    radius_arcsec=1.0,
+    offset_arcsec=0.0,
+    seed=42,
+    connection=None,
+):
     """Run both matchers over the same database-derived coordinate batch."""
     from db import DB
 
@@ -168,6 +198,7 @@ def benchmark(snapshot_dir, sample_size=10_000, radius_arcsec=1.0, connection=No
         inputs = _sample_inputs(db_connection, sample_size)
         if not inputs:
             raise RuntimeError("root_diaobject contains no positioned rows")
+        inputs = _offset_inputs(inputs, offset_arcsec, seed)
         (
             q3c_matches,
             q3c_distances,
@@ -196,18 +227,36 @@ def parse_args(argv=None):
     parser.add_argument("snapshot_dir", help="Snapshot made by export_root_diaobject_hats.py")
     parser.add_argument("--sample-size", type=int, default=10_000)
     parser.add_argument("--radius-arcsec", type=float, default=1.0)
+    parser.add_argument(
+        "--offset-arcsec",
+        type=float,
+        default=0.0,
+        help="Move each input this distance from its root in a random direction (default: 0)",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=42, help="Random seed for coordinate offsets (default: 42)"
+    )
     args = parser.parse_args(argv)
     if args.sample_size < 1:
         parser.error("--sample-size must be positive")
     if args.radius_arcsec <= 0:
         parser.error("--radius-arcsec must be positive")
+    if args.offset_arcsec < 0:
+        parser.error("--offset-arcsec must not be negative")
     return args
 
 
 def main(argv=None):
     args = parse_args(argv)
-    results = benchmark(args.snapshot_dir, args.sample_size, args.radius_arcsec)
+    results = benchmark(
+        args.snapshot_dir,
+        args.sample_size,
+        args.radius_arcsec,
+        args.offset_arcsec,
+        args.seed,
+    )
     print(f"Input rows:       {results['input_rows']}")
+    print(f"Input offset:     {args.offset_arcsec:.3f} arcsec (seed {args.seed})")
     print(f"Q3C match:        {results['q3c_seconds']:.3f} s")
     print(f"Diagnostics:      {results['diagnostics_seconds']:.3f} s (not included above)")
     print(f"HATS catalog load:{results['hats_load_seconds']:9.3f} s")

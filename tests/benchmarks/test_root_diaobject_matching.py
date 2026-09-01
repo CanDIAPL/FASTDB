@@ -1,6 +1,29 @@
+import astropy.units as u
 import pytest
+from astropy.coordinates import SkyCoord
 
-from benchmark_root_diaobject_matching import _classify_matches, parse_args
+from benchmark_root_diaobject_matching import _classify_matches, _offset_inputs, parse_args
+
+
+def test_offset_inputs():
+    inputs = [("one", 10.0, -20.0), ("two", 359.9999, 89.999)]
+
+    moved = _offset_inputs(inputs, offset_arcsec=0.4, seed=123)
+    repeated = _offset_inputs(inputs, offset_arcsec=0.4, seed=123)
+    assert moved == repeated
+    assert _offset_inputs(inputs, offset_arcsec=0, seed=123) is inputs
+
+    original_coordinates = SkyCoord(
+        ra=[row[1] for row in inputs] * u.deg,
+        dec=[row[2] for row in inputs] * u.deg,
+    )
+    moved_coordinates = SkyCoord(
+        ra=[row[1] for row in moved] * u.deg,
+        dec=[row[2] for row in moved] * u.deg,
+    )
+    assert moved_coordinates.separation(original_coordinates).arcsec == pytest.approx(
+        [0.4, 0.4], abs=1e-6
+    )
 
 
 def test_classify_matches():
@@ -55,11 +78,27 @@ def test_classify_matches():
 
 
 def test_benchmark_arguments():
-    args = parse_args(["snapshot", "--sample-size", "25", "--radius-arcsec", "2"])
+    args = parse_args(
+        [
+            "snapshot",
+            "--sample-size",
+            "25",
+            "--radius-arcsec",
+            "2",
+            "--offset-arcsec",
+            "0.4",
+            "--seed",
+            "123",
+        ]
+    )
     assert args.sample_size == 25
     assert args.radius_arcsec == 2
+    assert args.offset_arcsec == 0.4
+    assert args.seed == 123
 
     with pytest.raises(SystemExit):
         parse_args(["snapshot", "--sample-size", "0"])
     with pytest.raises(SystemExit):
         parse_args(["snapshot", "--radius-arcsec", "0"])
+    with pytest.raises(SystemExit):
+        parse_args(["snapshot", "--offset-arcsec", "-0.1"])
