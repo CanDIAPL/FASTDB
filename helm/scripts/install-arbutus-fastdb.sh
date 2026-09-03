@@ -17,7 +17,7 @@ if [[ $EUID -eq 0 ]]; then
   exit 1
 fi
 
-for command_name in curl docker helm kubectl openssl; do
+for command_name in curl docker git helm kubectl openssl; do
   command -v "$command_name" >/dev/null || {
     echo "Error: $command_name is required." >&2
     exit 1
@@ -39,6 +39,22 @@ if [[ ! -f "$VALUES_FILE" ]]; then
   echo "Error: values file not found: $VALUES_FILE" >&2
   exit 1
 fi
+
+echo "Initializing Git submodules..."
+git -C "$REPO_ROOT" submodule update --init --recursive
+
+# Create bind-mount sources before Docker Compose sees them. If Docker creates
+# a missing bind-mount source, it may be owned by root and the non-root
+# makeinstall container will not be able to write to it.
+mkdir -p "$REPO_ROOT/install" "$REPO_ROOT/db"
+for directory in "$REPO_ROOT/install" "$REPO_ROOT/db"; do
+  if [[ ! -w "$directory" || ! -x "$directory" ]]; then
+    echo "Error: $(id -un) cannot write to $directory." >&2
+    echo "Fix its ownership, then rerun this script:" >&2
+    echo "  sudo chown -R $(id -u):$(id -g) '$directory'" >&2
+    exit 1
+  fi
+done
 
 if [[ ! -f "$SECRETS_FILE" ]]; then
   echo "Creating persistent development secrets in $SECRETS_FILE..."
