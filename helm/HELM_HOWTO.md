@@ -116,6 +116,58 @@ The old combined workflow is temporarily retained as
 `helm/scripts/deprecated-start-local.sh`. It is deprecated and should only be
 used when reproducing the previous installation behavior.
 
+### Arbutus development VM workflow
+
+On an Ubuntu VM, set up the single-node K3s cluster once:
+
+```bash
+./helm/scripts/setup-arbutus-k3s.sh
+```
+
+Then build and install FASTDB:
+
+```bash
+./helm/scripts/install-arbutus-fastdb.sh
+```
+
+Create the initial FASTDB user without requiring browser access to MailHog:
+
+```bash
+./helm/scripts/create-user-arbutus.sh
+```
+
+The user script creates the server-side account only. It does not create a
+`.fastdb.ini` file or a Kubernetes client Secret. Each application that uses
+the FASTDB Python client is responsible for supplying its own credentials; a
+Kubernetes application will typically create and mount a Secret containing its
+`.fastdb.ini` file in that application's namespace.
+
+The installer builds images on the VM, imports them into K3s, and uses
+`values-arbutus-dev.yaml`. It generates development passwords on its first run
+in the ignored, mode-600 file `helm/fastdb/values-arbutus-secrets.yaml`; keep
+that file for later upgrades. PostgreSQL standby and alert ingestion are
+disabled in this initial configuration.
+
+The K3s `local-path` provisioner stores the database PVCs on the VM's root
+filesystem. The Arbutus flavour's ephemeral disk is deliberately unused. Check
+space periodically with:
+
+```bash
+df -h /
+sudo du -sh /var/lib/docker /var/lib/rancher/k3s
+```
+
+From inside the VM, FASTDB and MailHog are available at:
+
+```text
+http://localhost:30080
+http://localhost:30025
+```
+
+**TODO: Configure access from outside the VM.** These addresses are currently
+only reachable from within the VM. External access will require a floating IP
+or another route to the VM.
+
 `values-local.yaml` is specifically for the local/laptop setup.  In particular, it
 contains host-network settings for a local Kafka broker (using the [LASS](https://github.com/CanDIAPL/lass) tool) and an ingestion configuration for the `lass-topic`; do not use it as the starting point for a
 remote deployment.  Create a separate values file for each remote environment.

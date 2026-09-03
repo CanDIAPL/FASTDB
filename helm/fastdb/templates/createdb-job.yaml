@@ -43,7 +43,7 @@ spec:
       {{- if .Values.volumes.codeHostPath }}
       - name: fastdb-db
         hostPath:
-          path: /fastdb-db
+          path: {{ .Values.volumes.hostPaths.db | quote }}
           type: Directory
       {{- else if .Values.volumes.codePvc.enabled }}
       - name: code

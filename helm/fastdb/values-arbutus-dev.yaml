@@ -1,0 +1,71 @@
+# FASTDB development deployment on a single-node Arbutus K3s VM.
+# Use helm/scripts/install-arbutus-fastdb.sh rather than invoking Helm directly.
+
+global:
+  namespace: fastdb-arbutus-dev
+  environment: dev
+  # Images are built from this checkout and imported directly into K3s. This is a local image name, not a remote registry used for pulling images.
+  imageRegistry: fastdb.local
+  imageTag: test20260428
+  imagePullPolicy: Never
+  imagePullSecrets: []
+
+volumes:
+  type: pvc
+  storageClass: local-path
+  codeHostPath: true
+
+postgres:
+  enabled: true
+  persistence:
+    size: 8Gi
+    accessMode: ReadWriteOnce
+  externalAccess:
+    enabled: false
+
+# We will not start the postgres-standby because a standby on the same VM would consume resources without protecting against failure of that VM.
+postgresStandby:
+  enabled: false
+
+mongodb:
+  enabled: true
+  persistence:
+    size: 8Gi
+    accessMode: ReadWriteOnce
+
+webap:
+  enabled: true
+  externalAccess:
+    enabled: true
+    type: NodePort
+    nodePort: 30080
+  volumes:
+    sessions:
+      size: 1Gi
+      accessMode: ReadWriteOnce
+    queryResults:
+      size: 1Gi
+      accessMode: ReadWriteOnce
+    logs:
+      size: 1Gi
+      accessMode: ReadWriteOnce
+
+shell:
+  enabled: true
+
+queryrunner:
+  enabled: true
+
+mailhog:
+  enabled: true
+  externalAccess:
+    enabled: true
+    type: NodePort
+    nodePort: 30025
+
+createdb:
+  enabled: true
+
+# Broker configuration will be added after the basic deployment is working.
+ingestion:
+  enabled: false
