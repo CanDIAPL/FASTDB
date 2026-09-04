@@ -104,9 +104,10 @@ docker compose run --rm --entrypoint "" makeinstall /bin/bash -ec "
   make install
 "
 
+echo "Removing Docker build cache to free space for K3s images..."
+docker builder prune --all --force
+
 echo "Importing FASTDB images into K3s..."
-IMAGE_ARCHIVE="$(mktemp /tmp/fastdb-k3s-images.XXXXXX.tar)"
-trap 'rm -f "$IMAGE_ARCHIVE"' EXIT
 for image_name in \
   "$DOCKER_ARCHIVE/fastdb-postgres:$DOCKER_VERSION" \
   "$DOCKER_ARCHIVE/fastdb-mongodb:$DOCKER_VERSION" \
@@ -114,11 +115,9 @@ for image_name in \
   "$DOCKER_ARCHIVE/fastdb-webap:$DOCKER_VERSION" \
   "$DOCKER_ARCHIVE/fastdb-query-runner:$DOCKER_VERSION"; do
   echo "  $image_name"
-  docker image save --output "$IMAGE_ARCHIVE" "$image_name"
-  sudo k3s ctr --namespace k8s.io images import "$IMAGE_ARCHIVE"
+  docker image save "$image_name" |
+    sudo k3s ctr --namespace k8s.io images import -
 done
-rm -f "$IMAGE_ARCHIVE"
-trap - EXIT
 
 echo "Installing FASTDB with Helm..."
 # A Job's pod template is immutable. Recreate it so every upgrade runs current
