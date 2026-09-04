@@ -23,7 +23,9 @@ spec:
       - name: createdb
         image: {{ include "fastdb.image" (dict "image" .Values.createdb.image "global" .Values.global) }}
         imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-        command: ["python", "apply_migrations.py"]
+        command: ["/bin/sh", "-c"]
+        args:
+        - 'exec python apply_migrations.py -p "$(cat /secrets/pgpasswd)"'
         workingDir: /fastdb/db
         volumeMounts:
         - name: secrets
