@@ -145,8 +145,11 @@ Kubernetes application will typically create and mount a Secret containing its
 The installer builds images on the VM, imports them into K3s, and uses
 `values-arbutus-dev.yaml`. It generates development passwords on its first run
 in the ignored, mode-600 file `helm/fastdb/values-arbutus-secrets.yaml`; keep
-that file for later upgrades. PostgreSQL standby and alert ingestion are
-disabled in this initial configuration.
+that file for later upgrades. PostgreSQL standby is disabled. Alert ingestion
+expects a LASS Kafka broker published on port 19092 of the same VM. The
+installer discovers the K3s node's internal address and uses it to connect the
+FASTDB broker consumer to LASS, so the values file does not contain a
+VM-specific IP address.
 
 The K3s `local-path` provisioner stores the database PVCs on the VM's root
 filesystem. The Arbutus flavour's ephemeral disk is deliberately unused. Check

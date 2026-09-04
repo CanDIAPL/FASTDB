@@ -35,6 +35,16 @@ kubectl get node >/dev/null || {
   exit 1
 }
 
+NODE_IP="$(
+  kubectl get nodes \
+    --output=jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'
+)"
+if [[ -z "$NODE_IP" ]]; then
+  echo "Error: could not determine the K3s node's internal IP address." >&2
+  exit 1
+fi
+echo "K3s node address: $NODE_IP"
+
 if [[ ! -f "$VALUES_FILE" ]]; then
   echo "Error: values file not found: $VALUES_FILE" >&2
   exit 1
@@ -133,6 +143,7 @@ if ! helm upgrade --install "$RELEASE_NAME" "$REPO_ROOT/helm/fastdb" \
   --values "$SECRETS_FILE" \
   --set-string "volumes.hostPaths.install=$REPO_ROOT/install" \
   --set-string "volumes.hostPaths.db=$REPO_ROOT/db" \
+  --set-string "ingestion.brokerConsumer.dockerHostIp=$NODE_IP" \
   --wait \
   --wait-for-jobs \
   --timeout 10m; then

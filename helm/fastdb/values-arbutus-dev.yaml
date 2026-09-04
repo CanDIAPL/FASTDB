@@ -66,6 +66,24 @@ mailhog:
 createdb:
   enabled: true
 
-# Broker configuration will be added after the basic deployment is working.
 ingestion:
-  enabled: false
+  enabled: true
+  brokerConsumer:
+    name: lass
+    loggerName: LASS
+    server: host.docker.internal:19092
+    groupId: fastdb-arbutus-lass
+    topic: lass-topic
+    schemaFile: /fastdb/share/avsc/lsst.v10_0.alert.avsc
+    collectionBase: lass
+    brokerName: lass
+    # install-arbutus-fastdb.sh discovers the K3s node IP and supplies it to
+    # Helm, so this values file is reusable on different Arbutus VMs.
+    dockerHostIp: ""
+    # LASS advertises localhost:19092. This proxy forwards that pod-local
+    # address to the Docker-published Kafka port on the VM.
+    localhostProxy: true
+  processingVersion:
+    name: lass
+  sourceImporter:
+    schedule: "* * * * *"
