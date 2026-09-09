@@ -1,23 +1,29 @@
+# EDITING OF THIS MODULE IS IN PROGRESS, IT'S CURRENTLY BROKEN
+
 import sys
 import io
 import datetime
 import pytz
 import logging
 
+import numpy as np
 import pandas
 import astropy.time
+from psycopg import sql
 
 import db
 import util
+import ltcv
 
 # Want this to be False except when
 #  doing deep-in-the-weeds debugging
 _show_way_too_much_debug_info = False
 
 
-def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None, notclaimsince=None,
+def what_spectra_are_wanted( procver='realtime', position_procver=None,
+                             wantsince=None, requester=None, notclaimsince=None,
                              nospecsince=None, detsince=None, lim_mag=None, lim_mag_band=None,
-                             mjdnow=None, logger=None ):
+                             is_host=None, mjdnow=None, logger=None ):
     """Find out what spectra have been requested.
 
     In addition to the explicit filters below, there are some implicit filters:
@@ -85,6 +91,11 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
         the future, they will be thrown out if you don't specify a
         mjdnow in the future!
 
+      is_host : bool, default None
+        Set this to True if you only want wantedspectra of transients,
+        set it to False if you only want wantedspectra of hosts.  By
+        default, return both
+
       logger : logging.Logger object or None
         Will use util.logger if None is passed
 
@@ -92,11 +103,14 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
     -------
       pandas.DataFrame with columns:
          root_diaobject_id
-         diabojectid
+         diabojectid [ WARNING -- these aren't unique, so this is just a "random" one ]
          requester
          priority
-         ra
-         dec
+         ra -- ra given by the requester
+         dec -- dec given by the requester
+         diaobj_meanra  -- weghted average of detection positions of transient.  DO NOT USE FOR HOST
+         diaobj_meandec -- weighted average of detection positions of transient.  DO NOT USE FOR HOST.
+         is_hsot -- True if the requester claimed this was a host position, False if a transient position
          src_mjd -- mjd of latest detection
          src_band -- band of latest detection
          src_mag -- magnitude (AB) of latest detection
@@ -122,17 +136,21 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
         #   requester requests the same spectrum more than once?  Maybe a unique
         #   constraint in wantedspectra?
 
-        con.execute_nofetch( "CREATE TEMP TABLE tmp_wanted( root_diaobject_id UUID, requester text, priority int )",
+        con.execute_nofetch( "CREATE TEMP TABLE tmp_wanted( rootid UUID, is_host boolean, "
+                             "ra double precision, dec double precision, requester text, priority int, "
+                             "wanttime timestamp with time zone )",
                              explain=False, analyze=False )
         q = ( f"INSERT INTO tmp_wanted (\n"
-              f"  SELECT DISTINCT ON(root_diaobject_id,requester,priority) root_diaobject_id, requester, priority\n"
+              f"  SELECT DISTINCT ON(root_diaobject_id, requester, is_host)\n"
+              f"    root_diaobject_id, is_host, ra, dec, requester, priority, wanttime\n"
               f"  FROM (\n"
-              f"    SELECT w.root_diaobject_id, w.requester, w.priority, w.wanttime\n"
+              f"    SELECT w.root_diaobject_id, w.is_host, w.ra, w.dec, w.requester, w.priority, w.wanttime\n"
               f"           {',r.plannedspec_id' if notclaimsince is not None else ''}\n"
               f"    FROM wantedspectra w\n" )
         if notclaimsince is not None:
             q += ( "    LEFT JOIN plannedspectra r\n"
-                   "      ON r.root_diaobject_id=w.root_diaobject_id AND r.plantime>%(reqtime)s\n"
+                   "      ON r.root_diaobject_id=w.root_diaobject_id AND r.is_host=w.is_host\n"
+                   "        AND r.plantime>%(reqtime)s\n"
                    "  ) subq\n"
                    "  WHERE plannedspec_id IS NULL\n"
                   )
@@ -145,15 +163,19 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
             q += "    AND subq.wanttime>=%(wanttime)s\n"
         if requester is not None:
             q += "    AND requester=%(requester)s\n"
-        q += "  GROUP BY root_diaobject_id,requester,priority )"
-        subdict =  { 'wanttime': wantsince, 'reqtime': notclaimsince, 'now': now, 'requester': requester }
+        if is_host is not None:
+            q += "    AND is_host=%(is_host)s\n"
+        q += "  ORDER BY root_diaobject_id, requester, is_host, wanttime DESC )"
+        subdict =  { 'wanttime': wantsince, 'reqtime': notclaimsince, 'now': now, 'requester': requester,
+                     'is_host': is_host }
         con.execute_nofetch( q, subdict )
 
-        rows, _cols = con.execute( "SELECT COUNT(root_diaobject_id) FROM tmp_wanted" )
+        rows, _cols = con.execute( "SELECT COUNT(rootid) FROM tmp_wanted" )
         if rows[0][0] == 0:
             logger.debug( "Empty table tmp_wanted" )
-            return pandas.DataFrame( [], columns=[ 'root_diaobject_id', 'requester', 'priority', 'diaobjectid',
-                                                   'ra', 'dec', 'src_mjd', 'src_band', 'src_mag',
+            return pandas.DataFrame( [], columns=[ 'root_diaobject_id', 'requester', 'priority', 'wanttime',
+                                                   'diaobjectid', 'is_host', 'ra', 'dec',
+                                                   'src_mjd', 'src_band', 'src_mag',
                                                    'frced_mjd', 'frced_band', 'frced_mag' ] )
         else:
             logger.debug( f"{rows[0][0]} rows in tmp_wanted" )
@@ -172,28 +194,33 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
         if nospecsince is None:
             con.execute_nofetch( "ALTER TABLE tmp_wanted RENAME TO tmp_wanted_no_spec", explain=False, analyze=False )
         else:
-            con.execute_nofetch( "CREATE TEMP TABLE tmp_wanted_no_spec( root_diaobject_id UUID,\n"
-                                 "                                      requester text, priority int )\n",
+            con.execute_nofetch( "CREATE TEMP TABLE tmp_wanted_no_spec(\n"
+                                 "  rootid UUID, is_host boolean, ra double precision,\n"
+                                 "  dec double precision, requester text, priority int,\n"
+                                "   wanttime timestamp with time zone)\n",
                                  explain=False, analyze=False )
             q = ( "/*+ IndexScan(s idx_spectruminfo_root_diaobject_id) */"
                   "INSERT INTO tmp_wanted_no_spec (\n"
-                  "  SELECT DISTINCT ON(root_diaobject_id,requester,priority) root_diaobject_id, requester,\n"
-                  "                                                           priority\n"
+                  "  SELECT DISTINCT ON(rootid,requester,is_host)\n"
+                  "    rootid, is_host, ra, dec, requester, priority, wanttime\n"
                   "  FROM (\n"
-                  "    SELECT t.root_diaobject_id, t.requester, t.priority, s.specinfo_id\n"
+                  "    SELECT t.rootid, t.is_host, t.ra, t.dec, t.requester,\n"
+                  "           t.priority, s.specinfo_id, t.wanttime\n"
                   "    FROM tmp_wanted t\n"
                   "    LEFT JOIN spectruminfo s\n"
-                  "      ON s.root_diaobject_id=t.root_diaobject_id AND s.mjd>=%(obstime)s AND s.mjd<=%(now)s\n"
+                  "      ON s.root_diaobject_id=t.rootid AND s.is_host=t.is_host\n"
+                  "        AND s.mjd>=%(obstime)s AND s.mjd<=%(now)s\n"
                   "  ) subq\n"
                   "  WHERE specinfo_id IS NULL\n"
-                  "  GROUP BY root_diaobject_id, requester, priority )" )
+                  "  ORDER BY rootid, requester, is_host )\n" )
             con.execute_nofetch( q, { 'obstime': nospecsince, 'now': mjdnow } )
 
-        row, _cols = con.execute( "SELECT COUNT(root_diaobject_id) FROM tmp_wanted_no_spec" )
+        row, _cols = con.execute( "SELECT COUNT(rootid) FROM tmp_wanted_no_spec" )
         if row[0][0] == 0:
             logger.debug( "Empty table tmp_wanted_no_spec" )
-            return pandas.DataFrame( [], columns=[ 'root_diaobject_id', 'requester', 'priority', 'diaobjectid',
-                                                   'ra', 'dec', 'src_mjd', 'src_band', 'src_mag',
+            return pandas.DataFrame( [], columns=[ 'root_diaobject_id', 'requester', 'priority', 'wanttime',
+                                                   'diaobjectid', 'is_host', 'ra', 'dec',
+                                                   'src_mjd', 'src_band', 'src_mag',
                                                    'frced_mjd', 'frced_band', 'frced_mag' ] )
         else:
             logger.debug( f"{row[0][0]} rows in tmp_wanted_no_spec" )
@@ -207,200 +234,112 @@ def what_spectra_are_wanted( procver='realtime', wantsince=None, requester=None,
                 sio.write( f"{str(row[0]):36s} {row[1]:16s} {row[2]:2d}\n" )
             logger.debug( sio.getvalue() )
 
-        # Filter that table by throwing out things that do not have a detection since detsince
-        if detsince is None:
-            con.execute_nofetch( "ALTER TABLE tmp_wanted_no_spec RENAME TO tmp_wanted_detected",
-                                 explain=False, analyze=False )
-        else:
-            con.execute_nofetch( "CREATE TEMP TABLE tmp_wanted_detected( root_diaobject_id UUID, requester text, "
-                                 "                                       priority int )\n",
-                                 explain=False, analyze=False )
-            q = ( "/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
-                  "INSERT INTO tmp_wanted_detected (\n"
-                  "  SELECT DISTINCT ON(t.root_diaobject_id,requester,priority)\n"
-                  "    t.root_diaobject_id, requester, priority\n"
-                  "  FROM tmp_wanted_no_spec t\n"
-                  "  INNER JOIN diaobject o ON t.root_diaobject_id=o.rootid\n"
-                  "  INNER JOIN (\n"
-                  "    SELECT DISTINCT ON(src.diaobjectid,src.visit) src.diaobjectid\n"
-                  "    FROM diasource src\n"
-                  "    INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
-                  "      AND pv.procver_id=%(procver)s\n"
-                  "    WHERE src.midpointmjdtai>=%(detsince)s AND src.midpointmjdtai<=%(now)s\n"
-                  "    ORDER BY src.diaobjectid,src.visit,pv.priority DESC\n"
-                  "  ) s ON o.diaobjectid=s.diaobjectid\n"
-                  "  ORDER BY root_diaobject_id,requester,priority\n"
-                  ")" )
-            con.execute_nofetch( q, { 'detsince': detsince, 'procver': procver, 'now': mjdnow } )
+        # Pull down everything into a pandas dataframe
+        rows, cols = con.execute( "SELECT * FROM tmp_wanted_no_spec" )
+        df = util.laboriously_construct_pandas( rows, columns=cols, doublecols=['ra', 'dec'],
+                                                int16cols=['priority'], ignore_missing_cols=True )
+        df.set_index( 'rootid', inplace=True )
 
-        row, _cols = con.execute( "SELECT COUNT(root_diaobject_id) FROM tmp_wanted_detected" )
-        if row[0][0] == 0:
-            logger.debug( "Empty table tmp_wanted_detected" )
-            return pandas.DataFrame( [], columns=[ 'root_diaobject_id', 'requester', 'priority', 'diaobjectid',
-                                                   'ra', 'dec', 'src_mjd', 'src_band', 'src_mag',
-                                                   'frced_mjd', 'frced_band', 'frced_mag' ] )
-        else:
-            logger.debug( f"{row[0][0]} rows in tmp_wanted_detected\n" )
-        if _show_way_too_much_debug_info:
-            rows, _cols = con.execute( "SELECT * FROM tmp_wanted_detected" )
-            sio = io.StringIO()
-            sio.write( "Contents of tmp_wanted3:\n" )
-            sio.write( f"{'UUID':36s} {'requester':16s} priority\n" )
-            sio.write( "------------------------------------ ---------------- --------\n" )
-            for row in rows:
-                sio.write( f"{str(row[0]):36s} {row[1]:16s} {row[2]:2d}\n" )
-            logger.debug( sio.getvalue() )
+        # OK, this is a little profligate.  We could definitely pull less from postgres by doing
+        #   the "find latest detection" in SQL (and indeed I used to do it that way).  Not clear
+        #   if that would be faster, but this is simpler to code!
 
+        srcltcvs, objinfo = ltcv.many_object_ltcvs( processing_version=procver, which='detections',
+                                                    objids_table='tmp_wanted_no_spec', return_format='pandas',
+                                                    return_object_info=True, include_object_positions=True,
+                                                    always_use_weighted_source_positions=True,
+                                                    mjd_now=mjdnow, dbcon=con )
+        frcltcvs = ltcv.many_object_ltcvs( processing_version=procver, which='forced',
+                                           objids_table='tmp_wanted_no_spec', return_format='pandas',
+                                           return_object_info=False, mjd_now=mjdnow, dbcon=con )
 
-        # Get the latest *detection* (source) for the objects
-        con.execute_nofetch( "CREATE TEMP TABLE tmp_latest_detection( root_diaobject_id UUID,\n"
-                             "                                        diaobjectid bigint,\n"
-                             "                                        mjd double precision,\n"
-                             "                                        band text, mag real )",
-                             explain=False, analyze=False )
-        q = ( "/*+ IndexScan(src idx_diasource_diaobjectid) */\n"
-              "INSERT INTO tmp_latest_detection (\n"
-              "  SELECT root_diaobject_id, diaobjectid, mjd, band, mag\n"
-              "  FROM (\n"
-              "    SELECT DISTINCT ON (t.root_diaobject_id) t.root_diaobject_id, s.diaobjectid,\n"
-              "           s.band AS band, s.midpointmjdtai AS mjd,\n"
-              "           CASE WHEN s.psfflux>0 THEN -2.5*LOG(s.psfflux)+31.4 ELSE 99 END AS mag\n"
-              "    FROM tmp_wanted_detected t\n"
-              "    INNER JOIN diaobject o ON t.root_diaobject_id=o.rootid\n"
-              "    INNER JOIN (\n"
-              "      SELECT DISTINCT ON (src.diaobjectid,src.visit) src.diaobjectid,src.midpointmjdtai,\n"
-              "                                                     src.psfflux,src.band\n"
-              "      FROM diasource src\n"
-              "      INNER JOIN base_procver_of_procver pv ON src.base_procver_id=pv.base_procver_id\n"
-              "        AND pv.procver_id=%(procver)s\n"
-              "      WHERE src.midpointmjdtai<=%(now)s\n" )
-        if lim_mag_band is not None:
-            q += "      AND src.band=%(band)s "
-        q += ( "      ORDER BY src.diaobjectid, src.visit, pv.priority DESC\n"
-               "    ) s ON o.diaobjectid=s.diaobjectid\n"
-               "    ORDER BY t.root_diaobject_id,mjd DESC\n"
-               "  ) subq\n"
-               ")" )
-        con.execute_nofetch( q, { 'procver': procver, 'band': lim_mag_band, 'now': mjdnow } )
+    srcltcvs.reset_index( inplace=True )
+    frcltcvs.reset_index( inplace=True )
 
-        rows, _cols = con.execute( "SELECT COUNT(*) FROM tmp_latest_detection" )
-        logger.debug( f"{rows[0][0]} rows in tmp_latest_detection" )
-        if _show_way_too_much_debug_info:
-            rows, _cols = con.execute( "SELECT root_diaobject_id,mjd,band,mag FROM tmp_latest_detection" )
-            sio = io.StringIO()
-            sio.write( "Contents of tmp_latest_detection:\n" )
-            sio.write( f"{'UUID':36s} {'mjd':8s} {'band':6s} {'mag':6s}\n" )
-            sio.write( "------------------------------------ -------- ------ ------\n" )
-            for row in rows:
-                sio.write( f"{str(row[0]):36s} {row[1]:8.2f} {row[2]:6s} {row[3]:6.2f}\n" )
-            logger.debug( sio.getvalue() )
+    # Remove unwanted columns
+    yanks = [ i for i in srcltcvs.columns if i not in [ 'rootid', 'mjd', 'band', 'flux' ] ]
+    srcltcvs.drop( yanks, axis='columns', inplace=True )
+    yanks = [ i for i in frcltcvs.columns if i not in [ 'rootid', 'mjd', 'band', 'flux' ] ]
+    frcltcvs.drop( yanks, axis='columns', inplace=True )
 
-        # Get the latest forced source for the objects
-        con.execute_nofetch( "CREATE TEMP TABLE tmp_latest_forced( root_diaobject_id UUID,\n"
-                             "                                     diaobjectid bigint,\n"
-                             "                                     mjd double precision,\n"
-                             "                                     band text, mag real )\n",
-                             explain=False, analyze=False )
-        q = ( "/*+ IndexScan(frc idx_diaforcedsource_diaobjectid) */\n"
-              "INSERT INTO tmp_latest_forced (\n"
-              "  SELECT root_diaobject_id, diaobjectid, mjd, band, mag\n"
-              "  FROM (\n"
-              "    SELECT DISTINCT ON (t.root_diaobject_id) t.root_diaobject_id, f.diaobjectid,\n"
-              "           f.band AS band, f.midpointmjdtai AS mjd,\n"
-              "           CASE WHEN f.psfflux>0 THEN -2.5*LOG(f.psfflux)+31.4 ELSE NULL END AS mag\n"
-              "    FROM tmp_wanted_detected t\n"
-              "    INNER JOIN diaobject o ON t.root_diaobject_id=o.rootid\n"
-              "    INNER JOIN (\n"
-              "      SELECT DISTINCT ON (frc.diaobjectid,frc.visit) frc.diaobjectid,frc.midpointmjdtai,\n"
-              "                                                     frc.band,frc.psfflux\n"
-              "      FROM diaforcedsource frc\n"
-              "      INNER JOIN base_procver_of_procver pv ON frc.base_procver_id=pv.base_procver_id\n"
-              "        AND pv.procver_id=%(procver)s\n"
-              "      WHERE frc.midpointmjdtai<=%(now)s\n" )
-        if lim_mag_band is not None:
-            q += "        AND frc.band=%(band)s\n"
-        q += ( "      ORDER BY frc.diaobjectid, frc.visit, pv.priority DESC\n"
-               "    ) f ON o.diaobjectid=f.diaobjectid\n"
-               "    ORDER BY t.root_diaobject_id,mjd DESC\n"
-               "  ) AS subq\n"
-               ")" )
-        con.execute_nofetch( q, { 'procver': procver, 'band': lim_mag_band, 'now': mjdnow } )
+    # Extract latest row for each object in srcltcvs and frcltcvs
+    srcltcvs = srcltcvs.loc[ srcltcvs.groupby(["rootid", "band"])["mjd"].idxmax() ]
+    frcltcvs = frcltcvs.loc[ frcltcvs.groupby(["rootid", "band"])["mjd"].idxmax() ]
 
-        rows, _cols = con.execute( "SELECT COUNT(*) FROM tmp_latest_forced" )
-        logger.debug( f"{rows[0][0]} rows in tmp_latest_forced" )
-        if _show_way_too_much_debug_info:
-            rows, _cols = con.execute( "SELECT root_diaobject_id,mjd,band,mag FROM tmp_latest_forced" )
-            sio = io.StringIO()
-            sio.write( "Contents of tmp_latest_forced:\n" )
-            sio.write( f"{'UUID':36s} {'mjd':8s} {'band':6s} {'mag':6s}\n" )
-            sio.write( "------------------------------------ -------- ------ ------\n" )
-            for row in rows[0]:
-                sio.write( f"{str(row[0]):36s} {row[1]:8.2f} {row[2]:6s} {row[3]:6.2f}\n" )
-            logger.debug( sio.getvalue() )
-
-        # Get object info; base this off of the latest detection table so we know
-        #   which diaobjectid to use, in case there are multiple diaobjects for
-        #   the root diaobject.
-        con.execute_nofetch( "CREATE TEMP TABLE tmp_object_info( root_diaobject_id UUID, diaobjectid bigint,\n"
-                             "                                   ra double precision, dec double precision )",
-                             explain=False, analyze=False )
-        q = ( "INSERT INTO tmp_object_info (\n"
-              "  SELECT DISTINCT ON (t.root_diaobject_id) t.root_diaobject_id, t.diaobjectid, o.ra, o.dec\n"
-              "  FROM tmp_latest_detection t\n"
-              "  INNER JOIN diaobject o ON t.diaobjectid=o.diaobjectid\n"
-              ")\n" )
-        con.execute_nofetch( q )
-
-        rows, _cols = con.execute( "SELECT COUNT(*) FROM tmp_object_info" )
-        logger.debug( f"{rows[0][0]} rows in tmp_object_info" )
-        if _show_way_too_much_debug_info:
-            rows, _cols = con.execute( "SELECT root_diaobject_id,requester,priority,diaobjectid,ra,dec"
-                                       "FROM tmp_object_info" )
-            sio = io.StringIO()
-            sio.write( "Contents of tmp_object_info:\n" )
-            sio.write( f"{'UUID':36s} {'diaobjectid':12s} {'ra':8s} {'dec':8s}\n" )
-            sio.write( "------------------------------------ ------------ -------- --------\n" )
-            for row in rows:
-                sio.write( f"{str(row[0]):36s} {row[1]:16s} {row[2]:4d} {row[3]:12d} "
-                           f"{row[4]:8.4f} {row[5]:8.4f}\n" )
-            logger.debug( sio.getvalue() )
-
-        # Join all the things and pull
-        q = ( "SELECT t.root_diaobject_id, t.requester, t.priority, o.diaobjectid, o.ra, o.dec, "
-              "       s.mjd AS src_mjd, s.band AS src_band, s.mag AS src_mag, "
-              "       f.mjd AS frced_mjd, f.band AS frced_band, f.mag AS frced_mag "
-              "FROM tmp_wanted_detected t "
-              "LEFT JOIN tmp_object_info o ON t.root_diaobject_id=o.root_diaobject_id "
-              "LEFT JOIN tmp_latest_detection s ON t.root_diaobject_id=s.root_diaobject_id "
-              "LEFT JOIN tmp_latest_forced f ON t.root_diaobject_id=f.root_diaobject_id" )
-        rows, cols = con.execute( q )
-        df = pandas.DataFrame( rows, columns=cols )
+    # Magnitudes
+    for photdf in [ srcltcvs, frcltcvs ]:
+        photdf['mag'] = 99.
+        photdf.loc[ photdf['flux'] > 0, 'mag' ] = (
+            -2.5 * np.log10( photdf.loc[ photdf['flux'] > 0, 'flux' ] ) + 31.4 )
+        photdf['mag'] = 99.
+        photdf.loc[ photdf['flux'] > 0, 'mag' ] = (
+            -2.5 * np.log10( photdf.loc[ photdf['flux'] > 0, 'flux' ] ) + 31.4 )
+        photdf.drop( [ 'flux' ] , axis='columns', inplace=True )
+    srcltcvs.rename( { 'mjd': 'src_mjd', 'band': 'src_band', 'mag': 'src_mag' }, axis='columns', inplace=True )
+    frcltcvs.rename( { 'mjd': 'frced_mjd', 'band': 'frced_band', 'mag': 'frced_mag' }, axis='columns', inplace=True )
 
     # Filter by limiting magnitude if necessary
     if lim_mag is not None:
-        df['forcednewer'] = ( ( ( ~df['src_mjd'].isnull() ) & ( ~df['frced_mjd'].isnull() )
-                                  & ( df['frced_mjd']>=df['src_mjd'] ) )
-                              |
-                              ( ( df['src_mjd'].isnull() ) & ( ~df['frced_mjd'].isnull() ) ) )
-        if _show_way_too_much_debug_info:
-            widthbu = pandas.options.display.width
-            maxcolbu = pandas.options.display.max_columns
-            pandas.options.display.width = 4096
-            pandas.options.display.max_columns = None
-            debugdf = df.loc[ :, ['root_diaobject_id','src_mjd','src_band','src_mag',
-                                  'frced_mjd','frced_band','frced_mag','forcednewer'] ]
-            logger.debug( f"df:\n{debugdf}" )
-            pandas.options.display.width = widthbu
-            pandas.options.display.max_columns = maxcolbu
-        df = df[ ( df['forcednewer'] & ( df['frced_mag'] <= lim_mag ) )
-                 |
-                 ( (~df['forcednewer']) & ( df['src_mag'] <= lim_mag ) ) ]
+        if lim_mag_band is not None:
+            # We should only have (at most) one magntiude for each band
+            lim_srcltcvs = srcltcvs.loc[ srcltcvs.src_band == lim_mag_band, [ "rootid", "src_mjd", "src_mag" ] ]
+            lim_frcltcvs = frcltcvs.loc[ frcltcvs.frced_band == lim_mag_band,[ "rootid", "frced_mjd", "frced_mag" ] ]
+        else:
+            lim_srcltcvs = srcltcvs.loc[ srcltcvs.groupby(["rootid"])["src_mjd"].idxmax(),
+                                        [ "rootid", "src_mjd", "src_mag" ] ]
+            lim_frcltcvs = frcltcvs.loc[ frcltcvs.groupby(["rootid"])["frced_mjd"].idxmax(),
+                                        [ "rootid", "frced_mjd", "frced_mag" ] ]
 
+        lim_srcltcvs.set_index( 'rootid', inplace=True )
+        lim_frcltcvs.set_index( 'rootid', inplace=True )
+        lim_ltcvs = lim_srcltcvs.join( lim_frcltcvs, how='outer' )
+        lim_ltcvs.loc[ : , 'mag_for_cut' ] = lim_ltcvs.src_mag
+        # WORRY : isnull(), NaN, etc.
+        forcednewer = ( ( lim_ltcvs.mag_for_cut.isnull() & ( ~lim_ltcvs.frced_mag.isnull() ) ) |
+                        ( ( ( ~lim_ltcvs.mag_for_cut.isnull() ) & ( ~lim_ltcvs.frced_mag.isnull() ) )
+                          & ( lim_ltcvs.frced_mjd > lim_ltcvs.src_mjd ) ) )
+        lim_ltcvs.loc[ forcednewer, 'mag_for_cut' ] = lim_ltcvs.loc[ forcednewer, 'frced_mag' ]
+        lim_ltcvs = lim_ltcvs.loc[ :, [ 'mag_for_cut' ] ]
+        lim_ltcvs = lim_ltcvs[ lim_ltcvs.mag_for_cut <= lim_mag ]
+
+        # This will remove anything from df that doesn't have a rootid in lim_ltcvs
+        df = df.join( lim_ltcvs, how='inner' )
+        df.drop( ['mag_for_cut'], axis='columns', inplace=True )
+
+    # Keep only the latest lightcurve point independet of band
+    srcltcvs = srcltcvs.loc[ srcltcvs.groupby(["rootid"])["src_mjd"].idxmax() ]
+    frcltcvs = frcltcvs.loc[ frcltcvs.groupby(["rootid"])["frced_mjd"].idxmax() ]
+
+    # If necessary, throw out things that do not have a detection since detsince
+    if detsince is not None:
+        srcltcvs = srcltcvs[ srcltcvs.src_mjd >= detsince ]
+
+    # Throw out stuff we don't want from objinfo
+    objinfo.reset_index( inplace=True )
+    yanks = [ i for i in objinfo.columns if i not in [ 'rootid', 'diaobjectid', 'ra', 'dec' ] ]
+    objinfo.drop( yanks, axis='columns', inplace=True )
+    objinfo = objinfo.groupby( 'rootid' ).agg( 'first' )
+    objinfo.rename( { 'ra': 'diaobj_meanra', 'dec': 'diaobj_meandec' }, axis='columns', inplace=True )
+
+    # Join to latest mags.  We *assume* there are detections, otherwise nobody would want a spectrum.
+    # Also, we wouldn't have heard about the object in the first place.
+    srcltcvs.set_index( 'rootid', inplace=True )
+    df = df.join( srcltcvs, how='inner' )
+    df.rename( { 'mjd': 'src_mjd', 'flux': 'src_flux', 'band': 'src_band' }, axis='columns', inplace=True )
+    frcltcvs.set_index( 'rootid', inplace=True )
+    df = df.join( frcltcvs, how='left' )
+    df.rename( { 'mjd': 'frced_mjd', 'flux': 'frced_flux', 'band': 'frced_band' }, axis='columns', inplace=True )
+
+    # Join to obinfo to get ra/dec
+    df = df.join( objinfo, how='left' )
+
+    # Return
+    df.reset_index( inplace=True )
+    df.rename( { 'rootid': 'root_diaobject_id' }, axis='columns', inplace=True )
     return df
 
 
-def get_spectrum_info( root_diaobject_ids=None, facility=None, mjd_min=None, mjd_max=None, classid=None,
-                       z_min=None, z_max=None, since=None, logger=None ):
+def get_spectrum_info( logger=None, **kwargs ):
     if logger is None:
         logger = logging.getLogger( __name__ )
         logger.propagate = False
@@ -412,58 +351,35 @@ def get_spectrum_info( root_diaobject_ids=None, facility=None, mjd_min=None, mjd
             logout.setFormatter( formatter )
             logger.setLevel( logging.INFO )
 
-    with db.DB() as con:
-        cursor = con.cursor()
-        where = "WHERE"
-        q = "SELECT * FROM spectruminfo "
-        subdict = {}
+    with db.DBCon() as con:
+        q = sql.SQL( "SELECT * FROM spectruminfo " )
 
-        if root_diaobject_ids is not None:
-            if util.isSequence( root_diaobject_ids ):
-                q += f"{where} root_diaobject_id=ANY(%(ids)s) "
-                subdict['ids'] = [ str(i) for i in root_diaobject_ids ]
-            else:
-                q += f"{where} root_diaobject_id=%(id)s "
-                subdict['id'] = str(root_diaobject_ids)
-            where = "AND"
+        # Backwards compatibility
+        if 'since' in kwargs:
+            kwargs['inserted_at_min'] = kwargs['since']
+            del kwargs['since']
+        if 'root_diaobject_ids' in kwargs:
+            kwargs['root_diaobject_id'] = kwargs['root_diaobject_ids']
+            del kwargs['root_diaobject_ids']
 
-        if facility is not None:
-            q += f"{where} facility=%(fac)s "
-            subdict['fac'] = facility
-            where = "AND"
+        searchspec = {
+            'root_diaobject_id':  { 'mult': True,  'substr': False, 'minmax': False },
+            'facility':           { 'mult': True,  'substr': True,  'minmax': True },
+            'mjd':                { 'mult': False, 'substr': False, 'minmax': True },
+            'z':                  { 'mult': False, 'substr': False, 'minmax': True },
+            'class_description':  { 'mult': True,  'substr': True,  'minmax': False },
+            'classid':            { 'mult': True,  'substr': False, 'minmax': True },
+            'is_host':            { 'mult': False, 'substr': False, 'minmax': False },
+            'inserted_at':        { 'mult': False, 'substr': False, 'minmax': True }
+        }
 
-        if mjd_min is not None:
-            q += f"{where} mjd>=%(mjdmin)s "
-            subdict['mjdmin'] = mjd_min
-            where = "AND"
+        whereq, subdict, leftovers, _where = db.construct_pgsql_where_clause( searchspec, **kwargs )
+        if len(leftovers) != 0:
+            raise ValueError( "Unknown arguments: {leftovers}" )
 
-        if mjd_max is not None:
-            q += f"{where} mjd<=%(mjdmax)s "
-            subdict['mjdmax'] = mjd_max
-            where = "AND"
+        q += whereq
 
-        if classid is not None:
-            q += f"{where} classid=%(class)s "
-            subdict['class'] = classid
-            where = "AND"
-
-        if z_min is not None:
-            q += f"{where} z>=%(zmin)s "
-            subdict['zmin'] = z_min
-            where = "AND"
-
-        if z_max is not None:
-            q += f"{where} z<=%(zmax)s "
-            subdict['zmax'] = z_max
-            where = "AND"
-
-        if since is not None:
-            q += f"{where} inserted_at>=%(since)s "
-            subdict['since'] = since
-            where = "AND"
-
-        cursor.execute( q, subdict )
-        columns = [ col.name for col in cursor.description ]
-        df = pandas.DataFrame( cursor.fetchall(), columns=columns )
+        rows, cols = con.execute( q, subdict )
+        df = pandas.DataFrame( rows, columns=cols )
 
     return df
