@@ -94,10 +94,62 @@ fi
 
 cd "$REPO_ROOT"
 
-echo "Building FASTDB container images sequentially..."
-for service_name in postgres mongodb createdb webap queryrunner; do
-  echo "  $service_name"
-  docker compose build "$service_name"
+services=(postgres mongodb createdb webap queryrunner)
+images=(
+  "$DOCKER_ARCHIVE/fastdb-postgres:$DOCKER_VERSION"
+  "$DOCKER_ARCHIVE/fastdb-mongodb:$DOCKER_VERSION"
+  "$DOCKER_ARCHIVE/fastdb-shell:$DOCKER_VERSION"
+  "$DOCKER_ARCHIVE/fastdb-webap:$DOCKER_VERSION"
+  "$DOCKER_ARCHIVE/fastdb-query-runner:$DOCKER_VERSION"
+)
+existing_images=()
+built_images=()
+any_image_built=false
+any_image_exists=false
+
+echo "Checking FASTDB container images..."
+for index in "${!services[@]}"; do
+  image_name="${images[$index]}"
+  if docker image inspect "$image_name" >/dev/null 2>&1; then
+    echo "  Found $image_name"
+    existing_images[$index]=true
+    any_image_exists=true
+  else
+    echo "  Missing $image_name"
+    existing_images[$index]=false
+  fi
+done
+
+rebuild_all=false
+if [[ "$any_image_exists" == true ]]; then
+  read -r -p "Rebuild all FASTDB images from the current checkout? [y/N] " reply
+  case "$reply" in
+    y|Y|yes|YES|Yes)
+      rebuild_all=true
+      ;;
+    ""|n|N|no|NO|No)
+      echo "Reusing existing images; missing images will still be built."
+      ;;
+    *)
+      echo "Error: please answer y or n." >&2
+      exit 1
+      ;;
+  esac
+else
+  echo "No existing FASTDB images were found; building all images."
+fi
+
+for index in "${!services[@]}"; do
+  service_name="${services[$index]}"
+  image_name="${images[$index]}"
+  if [[ "$rebuild_all" == true || "${existing_images[$index]}" == false ]]; then
+    echo "  Building $service_name ($image_name)..."
+    docker compose build "$service_name"
+    built_images[$index]=true
+    any_image_built=true
+  else
+    built_images[$index]=false
+  fi
 done
 
 echo "Building FASTDB install/ for $EXTERNAL_URL..."
@@ -114,19 +166,22 @@ docker compose run --rm --entrypoint "" makeinstall /bin/bash -ec "
   make install
 "
 
-echo "Removing Docker build cache to free space for K3s images..."
-docker builder prune --all --force
+if [[ "$any_image_built" == true ]]; then
+  echo "Removing Docker build cache to free space for K3s images..."
+  docker builder prune --all --force
+fi
 
-echo "Importing FASTDB images into K3s..."
-for image_name in \
-  "$DOCKER_ARCHIVE/fastdb-postgres:$DOCKER_VERSION" \
-  "$DOCKER_ARCHIVE/fastdb-mongodb:$DOCKER_VERSION" \
-  "$DOCKER_ARCHIVE/fastdb-shell:$DOCKER_VERSION" \
-  "$DOCKER_ARCHIVE/fastdb-webap:$DOCKER_VERSION" \
-  "$DOCKER_ARCHIVE/fastdb-query-runner:$DOCKER_VERSION"; do
-  echo "  $image_name"
-  docker image save "$image_name" |
-    sudo k3s ctr --namespace k8s.io images import -
+echo "Checking K3s images..."
+for index in "${!images[@]}"; do
+  image_name="${images[$index]}"
+  if [[ "${built_images[$index]}" == true ]] ||
+     ! sudo k3s crictl inspecti "$image_name" >/dev/null 2>&1; then
+    echo "  Importing $image_name..."
+    docker image save "$image_name" |
+      sudo k3s ctr --namespace k8s.io images import -
+  else
+    echo "  Reusing $image_name"
+  fi
 done
 
 echo "Installing FASTDB with Helm..."

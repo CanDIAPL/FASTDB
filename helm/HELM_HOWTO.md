@@ -151,6 +151,11 @@ installer discovers the K3s node's internal address and uses it to connect the
 FASTDB broker consumer to LASS, so the values file does not contain a
 VM-specific IP address.
 
+On later runs, the installer reports which FASTDB images are already present
+and asks whether to rebuild all images from the current checkout or reuse the
+existing images. If existing images are reused, any missing image is still
+built automatically. Rebuild after changing a Dockerfile or image dependency.
+
 The K3s `local-path` provisioner stores the database PVCs on the VM's root
 filesystem. The Arbutus flavour's ephemeral disk is deliberately unused. Check
 space periodically with:
