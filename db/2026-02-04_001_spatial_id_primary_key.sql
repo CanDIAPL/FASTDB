@@ -14,7 +14,7 @@
 --   diasource: adds spatial_id column; FK changes to (diaobjectid, spatial_id)
 --   diaforcedsource: adds spatial_id column; FK changes to (diaobjectid, spatial_id)
 --   root_diaobject, rootid column: unchanged
-
+END;
 BEGIN;
 
 -- ============================================================
@@ -22,8 +22,8 @@ BEGIN;
 --         (they reference unique_diaobjectid which we need to drop)
 -- ============================================================
 
-ALTER TABLE diasource DROP CONSTRAINT fk_diasource_diaobjectid;
-ALTER TABLE diaforcedsource DROP CONSTRAINT fk_diaforcedsource_diaobjectid;
+ALTER TABLE diasource DROP CONSTRAINT IF EXISTS fk_diasource_diaobject;
+ALTER TABLE diaforcedsource DROP CONSTRAINT IF EXISTS fk_diaforcedsource_diaobject;
 
 -- ============================================================
 -- Step 2: diaobject — make spatial_id NOT NULL and new PK
@@ -41,7 +41,7 @@ ALTER TABLE diaobject ALTER COLUMN spatial_id SET NOT NULL;
 
 -- Drop the old PK and unique constraint (now safe — no dependent FKs)
 ALTER TABLE diaobject DROP CONSTRAINT diaobject_pkey;
-ALTER TABLE diaobject DROP CONSTRAINT unique_diaobjectid;
+ALTER TABLE diaobject DROP CONSTRAINT unique_diaobjectid CASCADE;
 
 -- New PK on spatial_id (deterministic, used for dedup)
 ALTER TABLE diaobject ADD PRIMARY KEY (spatial_id);

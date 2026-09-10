@@ -95,7 +95,7 @@ DELETE FROM base_processing_version WHERE id=ANY( SELECT oldid FROM tmp_bpvid );
 DELETE FROM tmp_bpvid;
 
 DROP TABLE tmp_bpvid;
- 
+
 CREATE INDEX ix_bpv_of_pv_bpv_table ON base_procver_of_procver( base_procver_id, _table );
 CREATE UNIQUE INDEX ix_bpv_of_pv_pv_table_prio
   ON base_procver_of_procver( procver_id, _table, priority );
@@ -172,7 +172,7 @@ ALTER TABLE diaobject_host_match ADD CONSTRAINT fk_diaobject_host_match_procver
 CREATE TABLE diaobject_position(
   diaobjectid                bigint NOT NULL,
   base_procver_id            uuid NOT NULL,
-  ra                         double precision NOT NULL, 
+  ra                         double precision NOT NULL,
   dec                        double precision NOT NULL,
   raerr                      real,
   decerr                     real,
@@ -219,7 +219,7 @@ INSERT INTO diaobject_position(diaobjectid, base_procver_id, ra, dec, raerr, dec
   SELECT o.diaobjectid, t.id, o.ra, o.dec, o.raerr, o.decerr, o.ra_dec_cov
   FROM diaobject o
   INNER JOIN tmp_bpvid t ON t.oldid=o.base_procver_id;
-DROP TABLE tmp_bpvid;  
+DROP TABLE tmp_bpvid;
 
 -- Remove columns from the diaobject table
 ALTER TABLE diaobject DROP COLUMN ra;
@@ -345,13 +345,13 @@ INSERT INTO diasource_extra(diasourceid, base_procver_id, detector, x, y, xerr, 
                             psflnl, psfchi2, psfndata, snr,
                             scienceflux, sciencefluxerr, templateflux, templatefluxerr,
                             extendedness, reliability, ixx, iyy, ixy, ixxpsf, iyypsf, ixypsf,
-                            flags, pixelflags, apflux, apfluxerr,                            
+                            flags, pixelflags, apflux, apfluxerr,
                             bboxsize, timeprocessedmjdtai, timewithdrawnmjdtai, parentdiasourceid)
   SELECT diasourceid, base_procver_id, detector, x, y, xerr, yerr, x_y_cov,
          psflnl, psfchi2, psfndata, snr,
          scienceflux, sciencefluxerr, templateflux, templatefluxerr,
          extendedness, reliability, ixx, iyy, ixy, ixxpsf, iyypsf, ixypsf,
-         flags, pixelflags, apflux, apfluxerr,                            
+         flags, pixelflags, apflux, apfluxerr,
          bboxsize, timeprocessedmjdtai, timewithdrawnmjdtai, parentdiasourceid
   FROM diasource_old;
 

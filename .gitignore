@@ -40,3 +40,4 @@ tests/load_snana_fits_reconstruct_indexes_constraints.sql
 
 # Emacs backup files
 **~
+*.DS_Store
