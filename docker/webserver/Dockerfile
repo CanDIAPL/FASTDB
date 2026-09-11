@@ -80,7 +80,7 @@ RUN source /venv/bin/activate && \
        flask-sock==0.7.0 \
        gevent==25.9.1 \
        gunicorn==25.1.0 \
-       healpy==1.17.3 \
+       healpy==1.20.0 \
        nested-pandas==0.6.8 \
        numpy==2.4.3 \
        pandas==2.3.3 \

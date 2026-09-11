@@ -5,6 +5,7 @@ templdir = @installdir@/webserver/templates
 staticdir = @installdir@/webserver/static
 
 webap_DATA = __init__.py baseview.py dbapp.py ltcvapp.py spectrumapp.py server.py \
+	cas_adapter.py cas_flask.py \
 	../../extern/rkwebutil/rkwebutil/rkauth_flask.py
 
 static_DATA = static/fastdb.css static/fastdb.js static/fastdb_ns.js static/fastdb_start.js \
