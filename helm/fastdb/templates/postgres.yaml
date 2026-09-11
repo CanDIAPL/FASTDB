@@ -70,6 +70,14 @@ spec:
         - name: wal-archive
           mountPath: /wal-archive
         {{- end }}
+        # First-time initialization creates the database and extensions before
+        # PostgreSQL starts listening on TCP. Keep the liveness probe disabled
+        # until that work has had enough time to finish on a small VM.
+        startupProbe:
+          tcpSocket:
+            port: 5432
+          periodSeconds: 5
+          failureThreshold: 120
         readinessProbe:
           tcpSocket:
             port: 5432
