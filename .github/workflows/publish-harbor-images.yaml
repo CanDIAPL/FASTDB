@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: Tag applied to all five FASTDB images
+        description: Tag applied to all six FASTDB images
         required: true
         type: string
 
@@ -36,6 +36,7 @@ jobs:
       - name: Build FASTDB images
         run: |
           docker compose build \
+            kafka-server \
             postgres \
             mongodb \
             shell \
@@ -45,6 +46,7 @@ jobs:
       - name: Push FASTDB images
         run: |
           docker compose push \
+            kafka-server \
             postgres \
             mongodb \
             shell \
