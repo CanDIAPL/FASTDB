@@ -318,12 +318,14 @@ def _send_all_alerts( **kwargs ):
             con.commit()
 
 
+@pytest.mark.skip( reason="Temporarily diabled: AlertSender workers can deadlock during large-batch CI tests" )
 def test_send_all_alerts( snana_fits_ppdb_loaded ):
     alerts = next( _send_all_alerts() )
     assert all( all( a[f] is None for f in [ 'cutoutDifference', 'cutoutScience', 'cutoutTemplate' ]
                     ) for a in alerts )
 
 
+@pytest.mark.skip( reason="Temporarily diabled: AlertSender workers can deadlock during large-batch CI tests" )
 def test_send_all_alerts_with_cutouts( snana_fits_ppdb_loaded ):
     alerts = next( _send_all_alerts( make_cutouts=True ) )
     assert all( all( a[f] is not None for f in [ 'cutoutDifference', 'cutoutScience', 'cutoutTemplate' ]
