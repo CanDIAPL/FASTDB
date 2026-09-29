@@ -55,9 +55,7 @@ jobs:
           cd tests
           tar xf elasticc2_test_data.tar.bz2
 
-      - name: run tests with hang diagnostics
+      - name: run test
         run: |
-          docker compose run --rm \
-            -e PYTEST_ADDOPTS="-vv -s -o faulthandler_timeout=300" \
-            runtests
+          docker compose run --rm runtests
           docker compose down -v
