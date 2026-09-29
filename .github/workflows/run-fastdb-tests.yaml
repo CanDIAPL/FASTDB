@@ -12,8 +12,7 @@ jobs:
     name: run fastdb tests
     runs-on: ubuntu-latest
     env:
-      DOCKER_ARCHIVE: images.canfar.net/candiapl
-      DOCKER_VERSION: manual-20260918
+      DOCKER_ARCHIVE: ghcr.io/lsstdesc
 
     steps:
       - name: Dump docker logs on failure
@@ -25,12 +24,12 @@ jobs:
         with:
           submodules: recursive
 
-      - name: log into Harbor container registry
+      - name: log into github container registry
         uses: docker/login-action@v3
         with:
-          registry: images.canfar.net
-          username: ${{ secrets.HARBOR_USERNAME }}
-          password: ${{ secrets.HARBOR_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: cleanup
         run: |
