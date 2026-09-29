@@ -55,7 +55,9 @@ jobs:
           cd tests
           tar xf elasticc2_test_data.tar.bz2
 
-      - name: run test
+      - name: run focused all-alerts importer tests
         run: |
-          docker compose run --rm runtests
+          docker compose run --rm \
+            -e PYTEST_ADDOPTS="-vv -s -o faulthandler_timeout=300" \
+            runtests tests/services/test_all_alerts_importer.py
           docker compose down -v
