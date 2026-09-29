@@ -531,12 +531,6 @@ class AlertSender:
                 _logger.info( "No alerts to send, returning." )
                 return
 
-            if reallysend:
-                _logger.info( f"Creating kafka producer, will send to topic {self.kafka_topic}" )
-                producer = confluent_kafka.Producer( { 'bootstrap.servers': self.kafka_server,
-                                                       'batch.size': 131072,
-                                                       'linger.ms': 50 } )
-
             totflushed = 0
             nextlog = 0
             _tottime = 0
@@ -567,6 +561,15 @@ class AlertSender:
                                               'parentconn': parentconn,
                                               'childconn': childconn }
                 freeprocs.add( proc.pid )
+
+            # Creating a Kafka producer starts background threads.  Start the
+            # reconstruction processes first so they are not forked from a
+            # multithreaded process, which can deadlock inherited locks.
+            if reallysend:
+                _logger.info( f"Creating kafka producer, will send to topic {self.kafka_topic}" )
+                producer = confluent_kafka.Producer( { 'bootstrap.servers': self.kafka_server,
+                                                       'batch.size': 131072,
+                                                       'linger.ms': 50 } )
 
             # Catch INT and TERM signals to shut down cleanly
             # Need to connect the signal handlers here, not before we launch the

@@ -207,12 +207,15 @@ def test_send_alerts( snana_fits_ppdb_loaded ):
         consumer = KafkaConsumer( 'kafka-server', f'test_send_alerts_{barf}', schema['alert_schema_file'],
                                   consume_nmsgs=10, logger=_logger )
         assert topic not in consumer.topic_list()
+        consumer.close()
 
         # Now really send
         _logger.info( f"test_send_alert sending to kafka topic {topic}" )
         nsent = sender( addeddays=30, reallysend=True )
         assert nsent == 77
         # The topic should now exist
+        consumer = KafkaConsumer( 'kafka-server', f'test_send_alerts_{barf}', schema['alert_schema_file'],
+                                  consume_nmsgs=10, logger=_logger )
         assert topic in consumer.topic_list()
 
         # There should be 77 messages on the topic
@@ -280,10 +283,13 @@ def _send_all_alerts( **kwargs ):
         consumer = KafkaConsumer( 'kafka-server', f'test_send_all_alerts_{barf}', schema['alert_schema_file'],
                                   consume_nmsgs=100, logger=_logger )
         assert topic not in consumer.topic_list()
+        consumer.close()
 
         nsent = sender( throughday=70000, reallysend=True )
         assert nsent == 1862
 
+        consumer = KafkaConsumer( 'kafka-server', f'test_send_all_alerts_{barf}', schema['alert_schema_file'],
+                                  consume_nmsgs=100, logger=_logger )
         assert topic in consumer.topic_list()
         consumer.subscribe( [ topic ], reset=True )
         msgs = []
