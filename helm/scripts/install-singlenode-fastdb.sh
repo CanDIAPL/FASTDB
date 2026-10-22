@@ -266,7 +266,7 @@ fi
 # Restart long-running Python processes so they load code from the refreshed
 # host-mounted install/ directory.
 echo "Restarting services that load the host-mounted FASTDB code..."
-for deployment_name in webap queryrunner shell; do
+for deployment_name in webap queryrunner shell brokerconsumer; do
   kubectl rollout restart "deployment/$deployment_name" --namespace "$NAMESPACE"
   kubectl rollout status "deployment/$deployment_name" \
     --namespace "$NAMESPACE" \

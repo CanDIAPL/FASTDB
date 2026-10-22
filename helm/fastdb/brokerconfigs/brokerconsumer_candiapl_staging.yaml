@@ -3,7 +3,7 @@ brokers:
     class: FinkConsumer
     server: kafka-lsst.fink-broker.org:24499
     groupid: fastdb-test-{barf}
-    topics: [ 'fink_sn_near_galaxy_candidate_lsst' ]
+    topics: [ 'fink_remove_unlikely_transients_lsst' ]
     schemaless: False
     schema_in_key: True
     updatetopics: false
