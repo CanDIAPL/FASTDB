@@ -11,7 +11,7 @@ brokers:
     schema_in_key: True
     updatetopics: false
     brokername_for_alerts: "LaunchedFink"
-    mongodb_collection_base: fastdb_fink_launcher_test
+    mongodb_collection_base: fastdb_fink_test
     cache_alerts: true
     loggername: FINK
     loggername_prefix: ""
@@ -27,6 +27,7 @@ brokers:
       max_restarts: null
 
   lass:
+    class: BrokerConsumer
     server: host.docker.internal:19092
     groupid: lass-test-{barf}
     topics: ["lass-topic"]

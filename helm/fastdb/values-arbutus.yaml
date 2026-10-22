@@ -69,10 +69,17 @@ createdb:
 
 ingestion:
   enabled: true
-  brokerConsumerConfig: "brokerconfigs/brokerconsumer_candiapl_staging.yaml"
   brokerConsumer:
+    replicas: 1
+    config: "brokerconfigs/brokerconsumer_candiapl_staging.yaml"
+    # LASS advertises localhost:19092. This proxy forwards that pod-local
+    # address to the Docker-published Kafka port on the VM.
+    dockerHostIp: ""
     localhostProxy: true
   processingVersion:
     name: staging
   sourceImporter:
     schedule: "* * * * *"
+    collections: # Collection base names to import
+      - "fastdb_fink_test"
+      - "fastdb_lass_test"

@@ -245,6 +245,7 @@ kubectl delete job createdb ingestion-processing-version \
   --namespace "$NAMESPACE" \
   --ignore-not-found
 
+echo "Helm will wait until the jobs start before printing status information, which may take a few minutes."
 if ! helm upgrade --install "$RELEASE_NAME" "$REPO_ROOT/helm/fastdb" \
   --namespace "$NAMESPACE" \
   --create-namespace \

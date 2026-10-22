@@ -11,7 +11,7 @@ metadata:
     {{- include "fastdb.labels" . | nindent 4 }}
 data:
   brokerconsumer.yaml: |-
-{{ .Files.Get .Values.ingestion.brokerConsumerConfig | indent 4 }}
+{{ .Files.Get .Values.ingestion.brokerConsumer.config | indent 4 }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -178,7 +178,7 @@ spec:
             - |
               {{- include "fastdb.waitForJob" "ingestion-processing-version" | nindent 14 }}
               /venv/bin/python /fastdb/services/source_importer.py \
-                -c {{ .Values.ingestion.brokerConsumer.collectionBase | quote }} \
+                -c {{ range .Values.ingestion.sourceImporter.collections }}"{{ . }}" {{end}} \
                 -o {{ .Values.ingestion.processingVersion.name | quote }} \
                 -p {{ .Values.ingestion.processingVersion.name | quote }} \
                 -s {{ .Values.ingestion.processingVersion.name | quote }} \
