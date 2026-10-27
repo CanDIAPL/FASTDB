@@ -54,8 +54,29 @@ HTTPS-only cookies also mean an HTTP SSH tunnel will not retain this deployment'
 login session; for tunnel-based development, use a copy of the values file with
 `basePath: ""` and `cookieSecure: false`.
 
-The MMP-required `/healthz` and `/api/build-info` endpoints remain separate
-work, as does testing real login and queries through MMP.
+## Check the required endpoints
+
+After reinstalling, run on the FASTDB VM:
+
+```bash
+curl --fail --show-error http://FASTDB_PRIVATE_IP:30080/healthz
+curl --fail --show-error http://FASTDB_PRIVATE_IP:30080/api/build-info
+```
+
+Replace the address if using another VM. Neither endpoint requires login.
+`/healthz` returns HTTP 200 when PostgreSQL and MongoDB respond, or HTTP 503
+with the unavailable dependency's name. It does not expose credentials or
+connection errors. It does not verify ingestion or every database migration.
+
+The installer writes `install/build-info.json` alongside the installed code.
+Workers read it at startup. `/api/build-info` reports `name`, a `git-<short SHA>`
+version, the full 40-character `commit`, and `dirty`. A dirty checkout is useful
+for development but is not an approved immutable release; commit the changes
+and reinstall before supplying release evidence to MMP. Missing or invalid
+identity returns HTTP 503, rather than guessing from a running checkout.
+
+These checks do not replace testing real login and queries through MMP, or
+the guide's release, persistence, backup and rollback requirements.
 
 ## Local checks
 
@@ -73,3 +94,6 @@ node tests/webserver/proxy_urls.mjs
 
 These database-free checks cover stripped-prefix and root requests, static
 links, cookies, direct probe paths, and JavaScript API/login/logout URLs.
+
+Run `/code/tests/webserver/test_deployment_endpoints.py` with the same Docker
+command to check endpoint responses, dependency failures and recorded build identity.

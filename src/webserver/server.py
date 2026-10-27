@@ -1,8 +1,13 @@
 import copy
+import json
 import logging
 import os
+import pathlib
+import re
 import textwrap
 
+import psycopg
+import pymongo
 from psycopg import sql
 import flask
 import flask_session
@@ -309,6 +314,55 @@ app.config.from_mapping(
 if os.environ.get('FASTDB_BASE_PATH'):
     app.wsgi_app = ProxyFix( app.wsgi_app, x_for=0, x_proto=1, x_prefix=1 )
 server_session = flask_session.Session( app )
+
+
+@app.get('/healthz')
+def healthz():
+    """Unauthenticated dependency check; never return connection details."""
+    checks = {}
+    try:
+        with psycopg.connect(host=db.dbhost, port=db.dbport, dbname=db.dbname,
+                             user=db.dbuser, password=db.dbpasswd,
+                             connect_timeout=3, options='-c statement_timeout=3000') as connection:
+            connection.execute('SELECT 1').fetchone()
+        checks['postgres'] = 'ok'
+    except Exception:
+        checks['postgres'] = 'unavailable'
+    try:
+        with pymongo.timeout(3):
+            with db.MGCon(readonly=True) as mongo:
+                mongo.db.command('ping')
+        checks['mongodb'] = 'ok'
+    except Exception:
+        checks['mongodb'] = 'unavailable'
+    ready = all(value == 'ok' for value in checks.values())
+    return {'status': 'ok' if ready else 'unavailable', 'checks': checks}, 200 if ready else 503
+
+
+def load_build_info():
+    """Read the installation's recorded identity, not a mutable Git checkout."""
+    try:
+        with open(pathlib.Path(__file__).resolve().parent.parent / 'build-info.json') as source:
+            info = json.load(source)
+        if (not re.fullmatch('[0-9a-f]{40}', info['commit'])
+                or not isinstance(info['version'], str) or not isinstance(info['dirty'], bool)):
+            return None
+        return {'name': 'fastdb', 'version': info['version'],
+                'commit': info['commit'], 'dirty': info['dirty']}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+_build_info = load_build_info()
+
+
+@app.get('/api/build-info')
+def build_info():
+    """Report the identity captured when this worker started."""
+    if _build_info is None:
+        return {'status': 'unavailable', 'error': 'Build identity has not been recorded.'}, 503
+    return _build_info
+
 
 rkauth_flask.RKAuthConfig.setdbparams(
     db_host=db.dbhost,
