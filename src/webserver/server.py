@@ -1,10 +1,12 @@
 import copy
 import logging
+import os
 import textwrap
 
 from psycopg import sql
 import flask
 import flask_session
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import db
 import ltcv
@@ -292,7 +294,9 @@ FDBLogger.setLevel( loglevel )
 
 app.config.from_mapping(
     SECRET_KEY=_flask_session_secret_key,
-    SESSION_COOKIE_PATH='/',
+    SESSION_COOKIE_PATH=os.environ.get('FASTDB_BASE_PATH') or '/',
+    SESSION_COOKIE_SECURE=os.environ.get('FASTDB_COOKIE_SECURE', '').lower() == 'true',
+    SESSION_COOKIE_SAMESITE='Lax',
     SESSION_TYPE='filesystem',
     SESSION_PERMANENT=True,
     SESSION_USE_SIGNER=True,
@@ -300,6 +304,10 @@ app.config.from_mapping(
     SESSION_FILE_THRESHOLD=1000,
 )
 
+# MMP strips the public prefix and supplies it in X-Forwarded-Prefix.
+# Enable only behind a trusted proxy that overwrites these headers.
+if os.environ.get('FASTDB_BASE_PATH'):
+    app.wsgi_app = ProxyFix( app.wsgi_app, x_for=0, x_proto=1, x_prefix=1 )
 server_session = flask_session.Session( app )
 
 rkauth_flask.RKAuthConfig.setdbparams(

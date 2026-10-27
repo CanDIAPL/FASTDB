@@ -27,11 +27,11 @@ spec:
         envFrom:
         - configMapRef:
             name: mongodb-config
-        {{- if .Values.webap.basePath }}
         env:
-        - name: SCRIPT_NAME
+        - name: FASTDB_BASE_PATH
           value: {{ .Values.webap.basePath | quote }}
-        {{- end }}
+        - name: FASTDB_COOKIE_SECURE
+          value: {{ .Values.webap.cookieSecure | default false | quote }}
         ports:
         - containerPort: 8080
         volumeMounts:
@@ -55,13 +55,13 @@ spec:
         {{- end }}
         readinessProbe:
           httpGet:
-            path: {{ .Values.webap.basePath | default "" }}/
+            path: /
             port: 8080
           initialDelaySeconds: 10
           periodSeconds: 5
         livenessProbe:
           httpGet:
-            path: {{ .Values.webap.basePath | default "" }}/
+            path: /
             port: 8080
           initialDelaySeconds: 30
           periodSeconds: 10

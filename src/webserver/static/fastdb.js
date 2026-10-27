@@ -20,13 +20,14 @@ fastdbap.Context = class
         this.objectsearch = null;
         this.maindiv = null;
 
-        this.connector = new rkWebUtil.Connector( "/", { 'Fastdb-Stringifyints': 1} );
+        this.basepath = document.querySelector( 'meta[name="fastdb-base-path"]' )?.content || "/";
+        this.connector = new rkWebUtil.Connector( this.basepath, { 'Fastdb-Stringifyints': 1} );
     };
 
     init()
     {
         let self = this;
-        this.auth = new rkAuth( this.authdiv, "",
+        this.auth = new rkAuth( this.authdiv, this.basepath,
                                 () => { self.first_render_page(); },
                                 () => { window.location.reload(); } );
         this.auth.checkAuth();
