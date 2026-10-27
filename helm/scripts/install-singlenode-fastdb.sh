@@ -245,6 +245,7 @@ kubectl delete job createdb ingestion-processing-version \
   --namespace "$NAMESPACE" \
   --ignore-not-found
 
+echo "Helm will wait until the jobs start before printing status information, which may take a few minutes."
 if ! helm upgrade --install "$RELEASE_NAME" "$REPO_ROOT/helm/fastdb" \
   --namespace "$NAMESPACE" \
   --create-namespace \
@@ -265,7 +266,7 @@ fi
 # Restart long-running Python processes so they load code from the refreshed
 # host-mounted install/ directory.
 echo "Restarting services that load the host-mounted FASTDB code..."
-for deployment_name in webap queryrunner shell; do
+for deployment_name in webap queryrunner shell brokerconsumer; do
   kubectl rollout restart "deployment/$deployment_name" --namespace "$NAMESPACE"
   kubectl rollout status "deployment/$deployment_name" \
     --namespace "$NAMESPACE" \
