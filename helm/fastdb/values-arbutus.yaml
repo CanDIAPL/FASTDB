@@ -37,7 +37,7 @@ mongodb:
 webap:
   enabled: true
   # MMP strips this prefix before forwarding requests to the webapp.
-  basePath: /launch/fastdb-dev
+  basePath: /launch/fastdb-alerts
   cookieSecure: true
   externalAccess:
     enabled: true

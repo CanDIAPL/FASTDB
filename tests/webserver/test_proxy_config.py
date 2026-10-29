@@ -12,7 +12,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-PREFIX = '/launch/fastdb-dev'
+PREFIX = '/launch/fastdb-alerts'
 
 
 def make_app(prefix='', secure=False):

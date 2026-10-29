@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-for (const prefix of ['/', '/launch/fastdb-dev/']) {
+for (const prefix of ['/', '/launch/fastdb-alerts/']) {
     const requests = [];
     const context = vm.createContext({
         console,
