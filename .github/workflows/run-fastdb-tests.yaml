@@ -11,7 +11,7 @@ on:
 jobs:
   tests:
     name: run fastdb tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       DOCKER_ARCHIVE: images.canfar.net/candiapl
       DOCKER_VERSION: manual-20260918
