@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DOCKER_ARCHIVE: images.canfar.net/candiapl
-      DOCKER_VERSION: manual-20260918
+      DOCKER_VERSION: manual-20261113
 
     steps:
       - name: checkout code
