@@ -189,6 +189,9 @@ services:
       createdb:
         condition: service_completed_successfully
     image: ${DOCKER_ARCHIVE:-ghcr.io/lsstdesc}/fastdb-shell:${DOCKER_VERSION:-test20260918a}
+    build:
+      context: ./docker/webserver
+      target: shell
     environment:
       - MONGODB_HOST=mongodb
       - MONGODB_DBNAME=brokeralert
