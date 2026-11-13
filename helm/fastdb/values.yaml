@@ -176,8 +176,10 @@ webap:
     type: NodePort
     nodePort: 30080
 
-  # Base path for subdirectory deployments (sets SCRIPT_NAME env var)
+  # Public prefix when the reverse proxy strips it before forwarding requests.
   basePath: ""
+  # Restrict session cookies to HTTPS when using an HTTPS reverse proxy.
+  cookieSecure: false
 
   # Ingress configuration
   ingress:

@@ -1,10 +1,10 @@
 {% extends 'base.html' %}
 
 {% block head %}
-<!-- <link rel="icon" type="image.png" href="static/favicon.png"> -->
-<link rel="stylesheet" href="@external_url@static/fastdb.css">
-<script src="@external_url@static/fastdb.js" type="module"></script>
-<script src="@external_url@static/fastdb_start.js" type="module"></script>
+<meta name="fastdb-base-path" content="{{ request.script_root }}/">
+<link rel="stylesheet" href="{{ url_for('static', filename='fastdb.css') }}">
+<script src="{{ url_for('static', filename='fastdb.js') }}" type="module"></script>
+<script src="{{ url_for('static', filename='fastdb_start.js') }}" type="module"></script>
 {% endblock %}
 
 {% block title %}FASTDB Web UI{% endblock %}

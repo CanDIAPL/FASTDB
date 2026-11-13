@@ -224,6 +224,12 @@ fi
 
 # Use the configured shell image to copy and configure the current checkout in
 # the host's install/ directory. Kubernetes later mounts it at /fastdb.
+# Record identity before generation; an uncommitted checkout is explicitly marked.
+BUILD_COMMIT="$(git rev-parse HEAD)"
+BUILD_DIRTY=false
+if [[ -n "$(git status --porcelain)" ]]; then
+  BUILD_DIRTY=true
+fi
 echo "Building FASTDB install/ for $EXTERNAL_URL..."
 USERID="$(id -u)" GROUPID="$(id -g)" \
 docker compose run --rm --entrypoint "" makeinstall /bin/bash -ec "
@@ -237,6 +243,13 @@ docker compose run --rm --entrypoint "" makeinstall /bin/bash -ec "
     --with-external-url=$EXTERNAL_URL
   make install
 "
+
+# Publish deployment identity alongside the installed code, not from live Git.
+printf '{"name":"fastdb","version":"git-%s","commit":"%s","dirty":%s}\n' \
+  "${BUILD_COMMIT:0:12}" "$BUILD_COMMIT" "$BUILD_DIRTY" \
+  > "$REPO_ROOT/install/build-info.json.tmp"
+chmod 644 "$REPO_ROOT/install/build-info.json.tmp"
+mv "$REPO_ROOT/install/build-info.json.tmp" "$REPO_ROOT/install/build-info.json"
 
 # Recreate one-shot Jobs because Kubernetes does not allow Helm to update their
 # pod templates in place, then install or upgrade the remaining resources.

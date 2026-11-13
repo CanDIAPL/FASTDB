@@ -36,6 +36,9 @@ mongodb:
 
 webap:
   enabled: true
+  # MMP strips this prefix before forwarding requests to the webapp.
+  basePath: /launch/fastdb-alerts
+  cookieSecure: true
   externalAccess:
     enabled: true
     type: NodePort

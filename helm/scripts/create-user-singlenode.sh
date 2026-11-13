@@ -2,7 +2,6 @@
 # Create a FASTDB user on a single-node deployment without using MailHog.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NAMESPACE="${FASTDB_NAMESPACE:-fastdb-arbutus-dev}"
 
 if [[ $EUID -eq 0 ]]; then
@@ -51,8 +50,8 @@ DISPLAY_NAME="${DISPLAY_NAME:-TESTUSER}"
 read -r -p "Email [test_user@mailhog]: " EMAIL
 EMAIL="${EMAIL:-test_user@mailhog}"
 
-# make_password.py emits SQL, so restrict these fields to simple values before
-# passing them to it. The password is never included in that SQL.
+# Restrict the fields inserted into SQL to simple values.
+# The password is never included in that SQL.
 if [[ ! "$USERNAME" =~ ^[A-Za-z0-9_.-]+$ ]]; then
   echo "Error: username may contain only letters, numbers, '.', '_' and '-'." >&2
   exit 1
@@ -95,25 +94,41 @@ INSERT_SQL="$({
   printf '%s\n' "$PASSWORD"
 } | docker run --rm -i \
   --network none \
-  --volume "$REPO_ROOT:/code:ro" \
   --entrypoint python \
   "$SHELL_IMAGE" \
   -c '
-import runpy
+import base64
+import json
+import secrets
 import sys
+import uuid
 
-script, username, email, display_name = sys.argv[1:]
+from Crypto.Cipher import AES
+from Crypto.Hash import SHA256
+from Crypto.Protocol.KDF import PBKDF2
+from Crypto.PublicKey import RSA
+
+username, email, display_name = sys.argv[1:]
 password = sys.stdin.readline().rstrip("\n")
-sys.argv = [
-    script,
-    "--username", username,
-    "--email", email,
-    "--displayname", display_name,
-    "--password", password,
-]
-runpy.run_path(script, run_name="__main__")
+salt = secrets.token_bytes(16)
+iv = secrets.token_bytes(12)
+keypair = RSA.generate(4096)
+pubkey = keypair.publickey().export_key("PEM").decode("ascii")
+# Browser WebCrypto imports binary PKCS#8, not PEM text. The Python client
+# accepts this format too. Match the browser password-reset encryption.
+privkey = keypair.export_key(format="DER", pkcs=8)
+aeskey = PBKDF2(password.encode("utf-8"), salt, 32, count=100000,
+                hmac_hash_module=SHA256)
+ciphertext, tag = AES.new(aeskey, AES.MODE_GCM, nonce=iv).encrypt_and_digest(privkey)
+encoded = lambda value: base64.b64encode(value).decode("ascii")
+privkeyjson = json.dumps({"privkey": encoded(ciphertext + tag),
+                         "salt": encoded(salt), "iv": encoded(iv)})
+# The fields were validated above; quote defensively as well.
+quote = lambda value: chr(39) + str(value).replace(chr(39), chr(39) * 2) + chr(39)
+values = ",".join(map(quote, [uuid.uuid4(), username, display_name, email, pubkey, privkeyjson]))
+print("INSERT INTO authuser(id,username,displayname,email,pubkey,privkey) "
+      + "VALUES(" + values + "::JSONB)")
 ' \
-  /code/extern/rkwebutil/rkwebutil/make_password.py \
   "$USERNAME" \
   "$EMAIL" \
   "$DISPLAY_NAME")"
