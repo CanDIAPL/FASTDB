@@ -10,26 +10,8 @@ metadata:
   labels:
     {{- include "fastdb.labels" . | nindent 4 }}
 data:
-  brokerconsumer.yaml: |
-    brokers:
-      {{ required "ingestion.brokerConsumer.name is required when ingestion is enabled" .Values.ingestion.brokerConsumer.name | quote }}:
-        class: BrokerConsumer
-        server: {{ required "ingestion.brokerConsumer.server is required when ingestion is enabled" .Values.ingestion.brokerConsumer.server | quote }}
-        groupid: {{ required "ingestion.brokerConsumer.groupId is required when ingestion is enabled" .Values.ingestion.brokerConsumer.groupId | quote }}
-        topics: [{{ required "ingestion.brokerConsumer.topic is required when ingestion is enabled" .Values.ingestion.brokerConsumer.topic | quote }}]
-        schemaless: true
-        schemafile: {{ .Values.ingestion.brokerConsumer.schemaFile | quote }}
-        brokername_for_alerts: {{ .Values.ingestion.brokerConsumer.brokerName | quote }}
-        mongodb_collection_base: {{ .Values.ingestion.brokerConsumer.collectionBase | quote }}
-        loggername: {{ .Values.ingestion.brokerConsumer.loggerName | quote }}
-        loggername_prefix: ""
-        consume_timeout: 1
-        nomsg_sleeptime: 5
-        extraconfig:
-          auto.offset.reset: earliest
-        pollkwargs:
-          restart_time_min: {{ .Values.ingestion.brokerConsumer.poll.restartTimeMinutes }}
-          notopic_sleeptime: {{ .Values.ingestion.brokerConsumer.poll.noTopicSleepSeconds }}
+  brokerconsumer.yaml: |-
+{{ .Files.Get .Values.ingestion.brokerConsumer.config | indent 4 }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -196,7 +178,7 @@ spec:
             - |
               {{- include "fastdb.waitForJob" "ingestion-processing-version" | nindent 14 }}
               /venv/bin/python /fastdb/services/source_importer.py \
-                -c {{ .Values.ingestion.brokerConsumer.collectionBase | quote }} \
+                -c {{ range .Values.ingestion.sourceImporter.collections }}"{{ . }}" {{end}} \
                 -o {{ .Values.ingestion.processingVersion.name | quote }} \
                 -p {{ .Values.ingestion.processingVersion.name | quote }} \
                 -s {{ .Values.ingestion.processingVersion.name | quote }} \
