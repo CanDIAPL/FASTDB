@@ -2,8 +2,23 @@ brokers:
   fink:
     class: FinkConsumer
     server: kafka-lsst.fink-broker.org:24499
-    groupid: fastdb-{barf}
-    topics: [ 'fink_sn_near_galaxy_candidate_lsst' ]
+    groupid: fastdb-{barf} # N.B. prepend with your fink registered groupd id
+    topics : [
+      'fink_extragalactic_lt20mag_candidate_lsst',
+      'fink_extragalactic_new_candidate_lsst',
+      'fink_extragalactic_svom_lsst',
+      'fink_faint_trails_lsst',
+      'fink_fast_transient_gvom_lsst',
+      'fink_hostless_candidate_lsst',
+      'fink_in_simbad_lsst',
+      'fink_in_tns_lsst',
+      'fink_is_solar_system_lsst',
+      'fink_mdwarf_flare_lsst',
+      'fink_most_likely_sn_lsst',
+      'fink_remove_unlikely_transients_lsst',
+      'fink_sn_near_galaxy_candidate_lsst',
+      'fink_uniform_sample_lsst'
+    ]
     schemaless: False
     schema_in_key: True
     updatetopics: false
