@@ -2,8 +2,12 @@ brokers:
   fink:
     class: FinkConsumer
     server: kafka-lsst.fink-broker.org:24499
-    groupid: fastdb-test-{barf}
-    topics: [ 'fink_remove_unlikely_transients_lsst' ]
+    groupid: fastdb-test-{barf} # N.B. prepend with your fink registered groupd id
+    topics: [
+      'fink_remove_unlikely_transients_lsst',
+      'fink_extragalactic_new_candidate_lsst',
+      'fink_uniform_sample_lsst'
+    ]
     schemaless: False
     schema_in_key: True
     updatetopics: false
