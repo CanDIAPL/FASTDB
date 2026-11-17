@@ -11,7 +11,7 @@ brokers:
     schemaless: False
     schema_in_key: True
     updatetopics: false
-    brokername_for_alerts: "LaunchedFink"
+    brokername_for_alerts: "Fink"
     mongodb_collection_base: fastdb_fink_test
     cache_alerts: true
     loggername: FINK
