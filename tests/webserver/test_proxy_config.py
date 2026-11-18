@@ -6,9 +6,7 @@ proxy; these tests deliberately do not import Flask into the shell container.
 
 import requests
 
-
 URL = 'http://webap:8080'
-
 
 def test_root_ignores_untrusted_proxy_headers():
     response = requests.get(URL + '/', timeout=10, headers={

@@ -85,6 +85,7 @@ else
   sudo env \
     INSTALL_K3S_VERSION="$K3S_VERSION" \
     INSTALL_K3S_EXEC="server --disable traefik --disable servicelb --default-local-storage-path $DEFAULT_LOCAL_STORAGE_PATH" \
+    # INSTALL_K3S_EXEC="server --disable traefik --disable servicelb" \
     INSTALL_K3S_SYMLINK="skip" \
     sh "$SETUP_TMPDIR/install-k3s.sh"
 fi
@@ -132,3 +133,4 @@ echo "K3s is ready."
 if [[ "$DOCKER_LOGIN_REQUIRED" == true ]]; then
   echo "Log out and back in before running Docker without sudo."
 fi
+newgrp docker # trigger changes to groups

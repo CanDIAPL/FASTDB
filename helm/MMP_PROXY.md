@@ -3,7 +3,7 @@
 This configuration prepares the existing webapp and existing-user login for:
 
 ```text
-https://staging.portal.candiapl.ca/launch/fastdb-alerts/
+https://staging.portal.candiapl.ca/launch/fastdb/
 ```
 
 Staging MMP will point to the development VM temporarily, then to the dedicated
@@ -20,7 +20,7 @@ requirements.
 
 ```yaml
 webap:
-  basePath: /launch/fastdb-alerts
+  basePath: /launch/fastdb
   cookieSecure: true
 ```
 
@@ -35,8 +35,8 @@ updates that installation rather than creating a separate database. No image
 rebuild is needed: the installer installs the current checkout's Python and
 web files into the host-mounted code directory.
 
-MMP must strip `/launch/fastdb-alerts` before forwarding requests and set
-`X-Forwarded-Prefix: /launch/fastdb-alerts` and `X-Forwarded-Proto: https`.
+MMP must strip `/launch/fastdb` before forwarding requests and set
+`X-Forwarded-Prefix: /launch/fastdb` and `X-Forwarded-Proto: https`.
 The existing MMP Caddy example provides that arrangement.
 
 ## What the small application changes do
