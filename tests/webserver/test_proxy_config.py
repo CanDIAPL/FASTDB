@@ -8,6 +8,7 @@ import requests
 
 URL = 'http://webap:8080'
 
+
 def test_root_ignores_untrusted_proxy_headers():
     response = requests.get(URL + '/', timeout=10, headers={
         'X-Forwarded-Prefix': '/ignored', 'X-Forwarded-Proto': 'https',
