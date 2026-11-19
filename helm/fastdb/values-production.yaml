@@ -80,7 +80,7 @@ ingestion:
     dockerHostIp: ""
     localhostProxy: true
   processingVersion:
-    name: staging
+    name: default
   sourceImporter:
     schedule: "* * * * *"
     collections: # Collection base names to import

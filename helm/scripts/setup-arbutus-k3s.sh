@@ -6,13 +6,21 @@ K3S_VERSION="v1.36.4+k3s1"
 KUBECTL_VERSION="v1.36.4"
 HELM_VERSION="v4.2.4"
 
-# This assumes the cephfs share is mounted on the VM
-DEFAULT_LOCAL_STORAGE_PATH=/fastdb/single-staging # https://docs.k3s.io/add-ons/storage
-
 if [[ $EUID -eq 0 ]]; then
   echo "Error: run this script as your normal user, not with sudo." >&2
   exit 1
 fi
+
+if [[ $# -ne 1 ]]; then
+  echo "Usage: $0 <local storage path (i.e. where the db will be stored)>" >&2
+  echo "Example: $0 /fastdb/single-staging" >&2
+  echo "Example: $0 /fastdb/single-production" >&2
+  exit 1
+fi
+
+# This assumes the cephfs share is mounted on the VM
+# DEFAULT_LOCAL_STORAGE_PATH=/fastdb/single-staging # https://docs.k3s.io/add-ons/storage
+DEFAULT_LOCAL_STORAGE_PATH=$1 # https://docs.k3s.io/add-ons/storage
 
 # shellcheck disable=SC1091
 source /etc/os-release
