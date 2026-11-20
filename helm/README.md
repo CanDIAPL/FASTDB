@@ -208,6 +208,17 @@ empty-collection `NoneType` error in source importer is a known application
 issue on checkouts lacking the empty-collection fix; it does not by itself mean
 database installation failed.
 
+You may also like to install a terminal interface called [k9s](https://k9scli.io/), which provides
+an interactive interface in the terminal that makes it easy view running pods, watch logs (by pressing 'l'),
+and attach to a pod's shell (by pressing 's').
+
+k9s can be installed with 
+
+```bash
+sudo snap install k9s --devmode
+sudo ln -s /snap/k9s/current/bin/k9s /snap/bin/ # if you get a 'k9s' command is not found error after install
+```
+
 ## 5. Create a user and query FASTDB
 
 Create a test account from the VM:
