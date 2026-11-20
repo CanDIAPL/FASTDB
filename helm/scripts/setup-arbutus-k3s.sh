@@ -108,6 +108,7 @@ sudo install \
   "$HOME/.kube/config"
 
 echo "Waiting for the Kubernetes node to become ready..."
+sleep 5
 kubectl wait \
   --for=condition=Ready \
   "node/$(hostname)" \
