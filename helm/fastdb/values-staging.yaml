@@ -5,7 +5,7 @@ global:
   namespace: fastdb-arbutus
   environment: dev
   imageRegistry: images.canfar.net/candiapl
-  imageTag: manual-20260918
+  imageTag: manual-20261113-v2
   imagePullPolicy: IfNotPresent
   # imagePullSecrets:
     # - name: fastdb-registry

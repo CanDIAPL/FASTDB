@@ -84,7 +84,7 @@ settings before installing:
 global:
   namespace: fastdb-arbutus
   imageRegistry: images.canfar.net/candiapl
-  imageTag: manual-20260918
+  imageTag: manual-20261113-v2
   imagePullPolicy: IfNotPresent
 
 volumes:

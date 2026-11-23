@@ -90,7 +90,7 @@ With the image already cached, run:
 docker run --rm --network none --platform linux/amd64 \
   -v "$PWD:/code:ro" -e PYTHONPATH=/code/src \
   --entrypoint python \
-  images.canfar.net/candiapl/fastdb-webap:manual-20260918 \
+  images.canfar.net/candiapl/fastdb-webap:manual-20261113-v2 \
   /code/tests/webserver/test_proxy_config.py
 
 node tests/webserver/proxy_urls.mjs
